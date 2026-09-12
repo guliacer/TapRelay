@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>netcoreapp3.1</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>8.0</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\pc-app\TaskEvent.cs" Link="TaskEvent.cs" />
+    <Compile Include="..\..\pc-app\SecretMasker.cs" Link="SecretMasker.cs" />
+    <Compile Include="..\..\pc-app\NetworkSettings.cs" Link="NetworkSettings.cs" />
+    <Compile Include="..\..\pc-app\ComfyUIPromptParser.cs" Link="ComfyUIPromptParser.cs" />
+    <Compile Include="..\..\pc-app\ComfyUIWorkflowConverter.cs" Link="ComfyUIWorkflowConverter.cs" />
+    <Compile Include="..\..\pc-app\ComfyUIPngChunkReader.cs" Link="ComfyUIPngChunkReader.cs" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">TapRelay</string>
+    <!-- 系统 heads-up 通知顶部会强制显示 Application label；用零宽字符隐藏该冗余标题，
+         同时由 MainActivity 单独保留 TapRelay，避免影响桌面图标名称。 -->
+    <string name="notification_app_name">&#x200B;</string>
+    <string name="accessibility_service_description">TapRelay 保活服务。降低后台冻结导致断连的概率，不读取屏幕内容。主要用于 ColorOS/realme 等厂商系统。</string>
+</resources>

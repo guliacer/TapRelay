@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Notify" parent="android:style/Theme.Material.Light.NoActionBar" />
+
+    <!--
+        FullScreenAlertActivity 主题：透明背景 + 无标题 + 无内容遮罩，
+        让 Compose 内容自己承担全屏遮罩与卡片绘制。
+        继承 Theme.Notify 保留 Material Light 基础属性，避免 Compose 主题断层。
+    -->
+    <style name="Theme.Notify.FullScreenAlert" parent="Theme.Notify">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+</resources>

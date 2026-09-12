@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- 扫描 PC 端二维码，仅在用户点击“扫码连接”时申请运行时权限。 -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- Android 13+ requires an explicit runtime grant before task notifications can be posted. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
+    <!-- 悬浮卡片：最多 5 张共享同一锚点紧凑层叠，缺权限时静默降级为普通通知。 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <application
+        android:name=".NotifyApplication"
+        android:allowBackup="true"
+        android:usesCleartextTraffic="true"
+        android:label="@string/notification_app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Notify">
+
+        <activity
+            android:name=".MainActivity"
+            android:label="@string/app_name"
+            android:exported="true"
+            android:launchMode="singleTop">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 自定义扫码 Activity：取景框缩小到 280dp（见 res/layout/scan_capture.xml）。 -->
+        <activity
+            android:name=".CustomCaptureActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
+        <!--
+            全屏提醒 Activity：由 setFullScreenIntent 在锁屏/熄屏时拉起。
+            - showWhenLocked/turnScreenOn：允许在锁屏之上显示并点亮屏幕
+            - excludeFromRecents：不在最近任务里留痕迹
+            - noHistory：用户切走后自动 finish，避免残留
+            - launchMode=singleInstance：独占任务栈，避免污染 MainActivity 的回退栈
+        -->
+        <activity
+            android:name=".notification.FullScreenAlertActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleInstance"
+            android:noHistory="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:theme="@style/Theme.Notify.FullScreenAlert" />
+
+        <service
+            android:name=".service.WebSocketService"
+            android:exported="false"
+            android:foregroundServiceType="remoteMessaging" />
+
+        <!--
+            无障碍保活服务：仅用于提升进程优先级，避免 ColorOS HANS 后台冻结
+            导致的 socket 静默切断（详见 09-问题与优化记录-内容.md P016/P028）。
+            - exported=false：仅系统可绑定
+            - permission=android.permission.BIND_ACCESSIBILITY_SERVICE：系统强制的绑定权限
+            - 不读取窗口内容、不监听业务事件，配置见 res/xml/accessibility_service_config.xml
+        -->
+        <service
+            android:name=".service.KeepAliveAccessibilityService"
+            android:exported="false"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <!-- 通知被划掉时把对应消息标记为已查看；只接受本应用自己的 PendingIntent。 -->
+        <receiver
+            android:name=".notification.NotificationDismissReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.lan.notify.notification.ACTION_DISMISS_MESSAGE" />
+                <action android:name="com.lan.notify.notification.ACTION_DISMISS_SUMMARY" />
+                <action android:name="com.lan.notify.notification.ACTION_DISMISS_ARCHIVE" />
+                <action android:name="com.lan.notify.notification.ACTION_APPROVAL_ALLOW" />
+                <action android:name="com.lan.notify.notification.ACTION_APPROVAL_DENY" />
+                <action android:name="com.lan.notify.notification.ACTION_RESUME_AGENT" />
+                <action android:name="com.lan.notify.notification.ACTION_AGENT_STOP" />
+                <action android:name="com.lan.notify.notification.ACTION_AGENT_CONTINUE" />
+            </intent-filter>
+        </receiver>
+    </application>
+
+</manifest>

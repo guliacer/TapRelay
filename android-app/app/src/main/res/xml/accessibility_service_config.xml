@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    无障碍服务配置。
+
+    本服务仅用于进程保活，不读取任何窗口内容、不监听任何事件、不执行任何业务逻辑。
+    通过最小化事件类型与无反馈标志，避免对用户产生任何干扰，同时满足系统对
+    AccessibilityService 的最低配置要求以获得进程优先级提升，缓解 ColorOS HANS
+    后台冻结导致的 socket 静默切断（详见 09-问题与优化记录-内容.md P016/P028）。
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/accessibility_service_description"
+    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault"
+    android:canRetrieveWindowContent="false"
+    android:canPerformGestures="false"
+    android:notificationTimeout="0" />

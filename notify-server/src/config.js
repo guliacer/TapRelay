@@ -1,0 +1,10 @@
+export const HOST = "0.0.0.0";
+export const PORT = 1122;
+export const HEARTBEAT_INTERVAL_MS = 30_000;
+export const HEALTH_PATH = "/health";
+export const SEND_PATH = "/send";
+export const EVENTS_PATH = "/events";
+export const MAX_MESSAGE_LENGTH = 500;
+export const MAX_REQUEST_BODY_BYTES = 16 * 1024;
+export const MAX_EVENT_BODY_BYTES = 64 * 1024;
+export const MAX_APP_REQUEST_BODY_BYTES = 2 * 1024 * 1024;

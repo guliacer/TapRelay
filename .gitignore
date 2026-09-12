@@ -1,0 +1,41 @@
+notify-server/node_modules/
+android-app/.gradle/
+android-app/local.properties
+android-app/app/build/
+android-app/build/
+pc-app/bin/
+pc-app/obj/
+*.log
+pc-app/publish/*
+!pc-app/publish/PACKAGE-RULE.md
+
+# Local build caches, including standalone test projects.
+.gradle-user/
+**/bin/
+**/obj/
+
+# Machine-specific agent state and continuation records.
+.codegraph/
+.freebuff/
+.omo/
+.workbuddy/
+.zcode/plans/
+tools/codex-notify-forward.txt
+
+# Separate historical fixture repository; not a TapRelay submodule.
+tools/TapRelay-remote-adapter-test/
+
+# Raw device/app diagnostics; keep curated assets and test fixtures separately.
+tests/baidu-active-notification-20260731.txt
+tests/baidu-notification-dump-20260731.txt
+tests/baidu-notification-phone-20260731.png
+tests/doubao-test2-appended.bin
+android-app/build-window.xml
+android-app/qa-current.png
+
+# Local credentials and Android signing material.
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore

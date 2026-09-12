@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>netcoreapp3.1</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>8.0</LangVersion>
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\pc-app\AgentLogPaths.cs" Link="AgentLogPaths.cs" />
+    <Compile Include="..\..\pc-app\AgentApiProxy.cs" Link="AgentApiProxy.cs" />
+    <Compile Include="..\..\pc-app\ShellAgentApiProxy.cs" Link="ShellAgentApiProxy.cs" />
+    <Compile Include="..\..\pc-app\AppInstallRoots.cs" Link="AppInstallRoots.cs" />
+    <Compile Include="..\..\pc-app\AgentCompletionEventParser.cs" Link="AgentCompletionEventParser.cs" />
+    <Compile Include="..\..\pc-app\ProjectNameResolver.cs" Link="ProjectNameResolver.cs" />
+    <Compile Include="..\..\pc-app\ClaudeProjectResolver.cs" Link="ClaudeProjectResolver.cs" />
+    <Compile Include="..\..\pc-app\AgentTaskTiming.cs" Link="AgentTaskTiming.cs" />
+    <Compile Include="..\..\pc-app\AgentRecordClassifier.cs" Link="AgentRecordClassifier.cs" />
+    <Compile Include="..\..\pc-app\CodexSessionMetadata.cs" Link="CodexSessionMetadata.cs" />
+    <Compile Include="..\..\pc-app\CodexSessionReader.cs" Link="CodexSessionReader.cs" />
+    <Compile Include="..\..\pc-app\CodexProjectResolver.cs" Link="CodexProjectResolver.cs" />
+    <Compile Include="..\..\pc-app\UnsupportedAppRegistry.cs" Link="UnsupportedAppRegistry.cs" />
+    <Compile Include="..\..\pc-app\DoubaoTaskContentSource.cs" Link="DoubaoTaskContentSource.cs" />
+    <Compile Include="..\..\pc-app\OpenCodeMonitor.cs" Link="OpenCodeMonitor.cs" />
+    <Compile Include="..\..\pc-app\FreebuffMonitor.cs" Link="FreebuffMonitor.cs" />
+    <Compile Include="..\..\pc-app\AdaptedProcessGate.cs" Link="AdaptedProcessGate.cs" />
+    <Compile Include="..\..\pc-app\NonReentrantMonitorTimer.cs" Link="NonReentrantMonitorTimer.cs" />
+    <Compile Include="..\..\pc-app\TraeUserPromptResolver.cs" Link="TraeUserPromptResolver.cs" />
+    <Compile Include="..\..\pc-app\TraeWorkWorkspaceResolver.cs" Link="TraeWorkWorkspaceResolver.cs" />
+    <Compile Include="..\..\pc-app\ToastNotificationReader.cs" Link="ToastNotificationReader.cs" />
+    <Compile Include="..\..\pc-app\ZCodeSessionReader.cs" Link="ZCodeSessionReader.cs" />
+    <Compile Include="..\..\pc-app\WorkBuddySessionReader.cs" Link="WorkBuddySessionReader.cs" />
+    <Compile Include="..\..\pc-app\WorkBuddyAcpAgentProxy.cs" Link="WorkBuddyAcpAgentProxy.cs" />
+    <Compile Include="..\..\pc-app\CloudflaredTunnelDetector.cs" Link="CloudflaredTunnelDetector.cs" />
+    <Compile Include="..\..\pc-app\TunnelDetector.cs" Link="TunnelDetector.cs" />
+    <Compile Include="..\..\pc-app\FrpTunnelDetector.cs" Link="FrpTunnelDetector.cs" />
+    <Compile Include="..\..\pc-app\NgrokTunnelDetector.cs" Link="NgrokTunnelDetector.cs" />
+    <Compile Include="..\..\pc-app\VirtualLanTunnelDetector.cs" Link="VirtualLanTunnelDetector.cs" />
+    <Compile Include="..\..\pc-app\ClaudeHahaApprovalRequestId.cs" Link="ClaudeHahaApprovalRequestId.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="3.1.32" />
+  </ItemGroup>
+</Project>

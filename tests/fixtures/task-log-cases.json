@@ -1,0 +1,6 @@
+[
+  { "name": "multiline-code", "taskLog": "  def result():\r\n    return 42\r\n\r\n验证通过。\n" },
+  { "name": "error-label", "taskLog": "[错误] 编译失败\n缺少输入文件。" },
+  { "name": "markdown-link", "taskLog": "[README.md](./README.md)\n\n- 已更新使用说明\n- 已验证" },
+  { "name": "source-looking-result", "taskLog": "[codex] 是结果中的原始标签。" }
+]

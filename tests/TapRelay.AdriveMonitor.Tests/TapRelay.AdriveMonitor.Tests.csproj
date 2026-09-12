@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>netcoreapp3.1</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>8.0</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\pc-app\AdriveTransferMonitor.cs" Link="AdriveTransferMonitor.cs" />
+    <Compile Include="..\..\pc-app\NonReentrantMonitorTimer.cs" Link="NonReentrantMonitorTimer.cs" />
+    <Compile Include="..\..\pc-app\AdaptedProcessGate.cs" Link="AdaptedProcessGate.cs" />
+    <Compile Include="..\..\pc-app\ProjectNameResolver.cs" Link="ProjectNameResolver.cs" />
+    <Compile Include="..\..\pc-app\AppInstallRoots.cs" Link="AppInstallRoots.cs" />
+    <None Include="fixtures\real-indexeddb-wal-6.0.0.log" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

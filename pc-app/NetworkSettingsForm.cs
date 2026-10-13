@@ -80,14 +80,19 @@ namespace TapRelay
             ConfigureTextBox(_relayUrlBox, Config.RelayUrl, colors);
             ConfigureTextBox(_relayRoomIdBox, Config.RelayRoomId, colors);
 
+            // 铁律 R2：端口固定 1122，不可漂移。禁用端口输入框，避免用户误改后
+            // PC 实际监听与手机端硬编码 1122 不一致导致连不上。
+            _listenPortBox.ReadOnly = true;
+            _advertisedPortBox.ReadOnly = true;
+
             AddRow(root, 1, "监听地址", _listenAddressBox, colors,
                 "0.0.0.0 = 监听本机所有网卡；127.0.0.1 仅本机可用");
             AddRow(root, 2, "监听端口", _listenPortBox, colors,
-                "PC 实际打开的端口，需允许 Windows 防火墙通过");
+                "固定为 1122（铁律 R2），不可修改");
             AddRow(root, 3, "对外地址（可选）", _advertisedAddressBox, colors,
                 "公网 IP / 域名；留空则显示自动发现的局域网地址");
             AddRow(root, 4, "对外端口", _advertisedPortBox, colors,
-                "端口映射后的手机连接端口，通常与监听端口相同");
+                "固定为 1122（铁律 R2），不可修改");
 
             // Separator
             var separatorLabel = new Label

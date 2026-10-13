@@ -9,6 +9,12 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
+import android.graphics.Rect
+import android.graphics.RectF
 import android.media.AudioAttributes
 import android.os.Build
 import android.provider.Settings
@@ -32,7 +38,6 @@ import com.lan.notify.data.TaskState
 import com.lan.notify.data.TaskDurationFormatter
 import com.lan.notify.data.TaskTokenFormatter
 import com.lan.notify.data.canonicalSourceKey
-import com.lan.notify.data.canSendMessage
 import com.lan.notify.data.displayContent
 import com.lan.notify.data.hasApprovalAction
 import com.lan.notify.data.isStoppable
@@ -70,7 +75,6 @@ object NotificationHelper {
     private const val APPROVAL_ALLOW_REQUEST_OFFSET = 20_000
     private const val APPROVAL_DENY_REQUEST_OFFSET = 30_000
     private const val AGENT_STOP_REQUEST_OFFSET = 40_000
-    private const val AGENT_CONTINUE_REQUEST_OFFSET = 50_000
 
     fun createChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -359,9 +363,6 @@ object NotificationHelper {
                     APPROVAL_DENY_REQUEST_OFFSET
                 )
             },
-            continueIntent = message.takeIf { it.canSendMessage() }?.let {
-                agentContinueIntent(context, it.id)
-            },
             stop = message.takeIf { it.isStoppable() }?.let {
                 agentStopIntent(context, it.id)
             },
@@ -405,9 +406,6 @@ object NotificationHelper {
                     NotificationDismissReceiver.ACTION_APPROVAL_DENY,
                     APPROVAL_DENY_REQUEST_OFFSET
                 )
-            },
-            continueIntent = message.takeIf { it.canSendMessage() }?.let {
-                agentContinueIntent(context, it.id)
             },
             stop = message.takeIf { it.isStoppable() }?.let {
                 agentStopIntent(context, it.id)
@@ -529,7 +527,6 @@ object NotificationHelper {
         process: PendingIntent? = null,
         allow: PendingIntent? = null,
         deny: PendingIntent? = null,
-        continueIntent: PendingIntent? = null,
         stop: PendingIntent? = null,
         dismiss: PendingIntent? = null
     ) {
@@ -558,14 +555,12 @@ object NotificationHelper {
         val approval = showControls && message.hasApprovalAction() && allow != null && deny != null
         val waiting = showControls && message.isWaitingTask() && !approval && process != null
         val showDismissAll = showControls && !approval && !waiting && dismissAll != null
-        val showContinue = showControls && !approval && continueIntent != null
         val showStop = showControls && !approval && stop != null
         val showDismiss = showControls && !approval && dismiss != null
         val controlVisibility = if (
-            approval || waiting || showDismissAll || showContinue || showStop || showDismiss
+            approval || waiting || showDismissAll || showStop || showDismiss
         ) View.VISIBLE else View.GONE
         views.setViewVisibility(R.id.notification_actions, controlVisibility)
-        views.setViewVisibility(R.id.notification_continue, if (showContinue) View.VISIBLE else View.GONE)
         views.setViewVisibility(R.id.notification_dismiss_all, if (showDismissAll) View.VISIBLE else View.GONE)
         views.setViewVisibility(R.id.notification_process, if (waiting) View.VISIBLE else View.GONE)
         views.setViewVisibility(R.id.notification_allow, if (approval) View.VISIBLE else View.GONE)
@@ -576,7 +571,6 @@ object NotificationHelper {
         process?.takeIf { waiting }?.let { views.setOnClickPendingIntent(R.id.notification_process, it) }
         allow?.takeIf { approval }?.let { views.setOnClickPendingIntent(R.id.notification_allow, it) }
         deny?.takeIf { approval }?.let { views.setOnClickPendingIntent(R.id.notification_deny, it) }
-        continueIntent?.takeIf { showContinue }?.let { views.setOnClickPendingIntent(R.id.notification_continue, it) }
         stop?.takeIf { showStop }?.let { views.setOnClickPendingIntent(R.id.notification_stop, it) }
         dismiss?.takeIf { showDismiss }?.let { views.setOnClickPendingIntent(R.id.notification_dismiss, it) }
     }
@@ -589,19 +583,17 @@ object NotificationHelper {
         process: PendingIntent? = null,
         allow: PendingIntent? = null,
         deny: PendingIntent? = null,
-        continueIntent: PendingIntent? = null,
         stop: PendingIntent? = null,
         dismiss: PendingIntent?
     ) {
         val approval = message.hasApprovalAction() && allow != null && deny != null
         val waiting = message.isWaitingTask() && !approval && process != null
         val showDismissAll = !approval && !waiting && dismissAll != null
-        val showContinue = !approval && continueIntent != null
         val showStop = !approval && stop != null
         val showDismiss = !approval && dismiss != null
-        val showActions = approval || waiting || showDismissAll || showContinue || showStop || showDismiss
+        val showActions = approval || waiting || showDismissAll || showStop || showDismiss
         val visibleActionCount = listOf(
-            approval, waiting, showDismissAll, showContinue, showStop, showDismiss
+            approval, waiting, showDismissAll, showStop, showDismiss
         ).count { it } + if (approval) 1 else 0
         views.setViewVisibility(
             R.id.notification_expanded_actions,
@@ -616,7 +608,6 @@ object NotificationHelper {
             R.id.notification_expanded_action_spacer_end,
             if (centerSingleAction) View.VISIBLE else View.GONE
         )
-        views.setViewVisibility(R.id.notification_expanded_continue, if (showContinue) View.VISIBLE else View.GONE)
         views.setViewVisibility(R.id.notification_expanded_process, if (waiting) View.VISIBLE else View.GONE)
         views.setViewVisibility(R.id.notification_expanded_allow, if (approval) View.VISIBLE else View.GONE)
         views.setViewVisibility(R.id.notification_expanded_deny, if (approval) View.VISIBLE else View.GONE)
@@ -632,9 +623,6 @@ object NotificationHelper {
         process?.takeIf { waiting }?.let { views.setOnClickPendingIntent(R.id.notification_expanded_process, it) }
         allow?.takeIf { approval }?.let { views.setOnClickPendingIntent(R.id.notification_expanded_allow, it) }
         deny?.takeIf { approval }?.let { views.setOnClickPendingIntent(R.id.notification_expanded_deny, it) }
-        continueIntent?.takeIf { showContinue }?.let {
-            views.setOnClickPendingIntent(R.id.notification_expanded_continue, it)
-        }
         stop?.takeIf { showStop }?.let {
             views.setOnClickPendingIntent(R.id.notification_expanded_stop, it)
         }
@@ -724,9 +712,6 @@ object NotificationHelper {
                         APPROVAL_DENY_REQUEST_OFFSET
                     )
                 },
-                continueIntent = latest.takeIf { it.canSendMessage() }?.let {
-                    agentContinueIntent(context, it.id)
-                },
                 stop = latest.takeIf { it.isStoppable() }?.let {
                     agentStopIntent(context, it.id)
                 },
@@ -770,10 +755,7 @@ object NotificationHelper {
                     APPROVAL_DENY_REQUEST_OFFSET
                 )
             },
-            continueIntent = latest.takeIf { it.canSendMessage() }?.let {
-                agentContinueIntent(context, it.id)
-            },
-            stop = latest.takeIf { it.isStoppable() }?.let {
+                stop = latest.takeIf { it.isStoppable() }?.let {
                 agentStopIntent(context, it.id)
             },
             dismiss = dismissIntent(context, latest)
@@ -891,7 +873,7 @@ object NotificationHelper {
         ?.let { encoded ->
             runCatching {
                 val bytes = Base64.decode(encoded, Base64.DEFAULT)
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.let(::circularIconBitmap)
             }.getOrNull()
         }
 
@@ -902,7 +884,31 @@ object NotificationHelper {
     private fun taskIconBitmap(context: Context, resourceId: Int): Bitmap =
         requireNotNull(BitmapFactory.decodeResource(context.resources, resourceId)) {
             "Unable to decode notification card icon resource $resourceId"
-        }
+        }.let(::circularIconBitmap)
+
+    /**
+     * RemoteViews does not guarantee that a bitmap's transparent canvas is rendered as a
+     * circular icon on every Android skin. Apply the mask before handing it to the system.
+     */
+    private fun circularIconBitmap(source: Bitmap): Bitmap {
+        val size = minOf(source.width, source.height)
+        val output = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(output)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        val radius = size / 2f
+        val sourceRect = Rect(
+            (source.width - size) / 2,
+            (source.height - size) / 2,
+            (source.width + size) / 2,
+            (source.height + size) / 2
+        )
+        val targetRect = RectF(0f, 0f, size.toFloat(), size.toFloat())
+        canvas.drawCircle(radius, radius, radius, paint)
+        paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
+        canvas.drawBitmap(source, sourceRect, targetRect, paint)
+        paint.xfermode = null
+        return output
+    }
 
     private fun contentIntent(context: Context, message: NotifyMessage): PendingIntent =
         PendingIntent.getActivity(
@@ -985,16 +991,6 @@ object NotificationHelper {
             messageId.hashCode() + AGENT_STOP_REQUEST_OFFSET,
             Intent(context, NotificationDismissReceiver::class.java)
                 .setAction(NotificationDismissReceiver.ACTION_AGENT_STOP)
-                .putExtra(NotificationDismissReceiver.EXTRA_MESSAGE_ID, messageId),
-            PendingIntent.FLAG_UPDATE_CURRENT or pendingIntentImmutableFlag()
-        )
-
-    private fun agentContinueIntent(context: Context, messageId: String): PendingIntent =
-        PendingIntent.getBroadcast(
-            context,
-            messageId.hashCode() + AGENT_CONTINUE_REQUEST_OFFSET,
-            Intent(context, NotificationDismissReceiver::class.java)
-                .setAction(NotificationDismissReceiver.ACTION_AGENT_CONTINUE)
                 .putExtra(NotificationDismissReceiver.EXTRA_MESSAGE_ID, messageId),
             PendingIntent.FLAG_UPDATE_CURRENT or pendingIntentImmutableFlag()
         )

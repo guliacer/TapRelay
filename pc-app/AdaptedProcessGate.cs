@@ -43,7 +43,10 @@ namespace TapRelay
                 ["baidunetdisk"] = new[] { "BaiduNetdisk", "BaiduNetdiskHost", "BaiduNetdiskRender" },
                 ["quarknetdisk"] = new[] { "quark_cloud_drive", "QuarkCloudDrive" },
                 ["adrive"] = new[] { "aDrive" },
+                // WorkBuddy 与 WorkBuddy AI 是两个独立安装包和进程，分别由
+                // 独立的 appKey 门控，避免禁用一个版本时误放行另一个版本。
                 ["workbuddy"] = new[] { "WorkBuddy" },
+                ["workbuddy-ai"] = new[] { "WorkBuddyAI" },
                 ["opencode"] = new[] { "OpenCode" },
                 ["deepseekharness"] = new[] { "DeepSeek Harness Desktop" },
                 ["freebuff"] = new[] { "Freebuff" }

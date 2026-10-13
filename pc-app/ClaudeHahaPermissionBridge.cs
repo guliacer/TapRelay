@@ -41,16 +41,20 @@ namespace TapRelay
 
         private readonly NotifyServer _server;
         private readonly Action<string> _log;
+        // 监听器的挂载/卸载/重连属于实现细节：它们描述的是"桥接还在不在工作"，
+        // 而不是用户可读的事件。走诊断通道，文件里仍有完整时间线，首页不被淹没。
+        private readonly Action<string> _detailLog;
         private readonly ConcurrentDictionary<string, SessionListener> _listeners =
             new ConcurrentDictionary<string, SessionListener>(StringComparer.OrdinalIgnoreCase);
         private readonly CancellationTokenSource _shutdown = new CancellationTokenSource();
         private Task? _discoveryLoop;
         private int _disposed;
 
-        public ClaudeHahaPermissionBridge(NotifyServer server, Action<string> log)
+        public ClaudeHahaPermissionBridge(NotifyServer server, Action<string> log, Action<string>? detailLog = null)
         {
             _server = server ?? throw new ArgumentNullException(nameof(server));
             _log = log ?? throw new ArgumentNullException(nameof(log));
+            _detailLog = detailLog ?? _log;
         }
 
         /// <summary>手机端 requestId 是否由本桥接负责。</summary>
@@ -220,11 +224,11 @@ namespace TapRelay
                     continue;
                 }
 
-                var listener = new SessionListener(pair.Key, pair.Value, _server, _log);
+                var listener = new SessionListener(pair.Key, pair.Value, _server, _log, _detailLog);
                 if (_listeners.TryAdd(pair.Key, listener))
                 {
                     listener.Start(_shutdown.Token);
-                    _log("claude-haha permission listener attached session=" + pair.Key + " port=" + pair.Value);
+                    _detailLog("claude-haha permission listener attached session=" + pair.Key + " port=" + pair.Value);
                 }
             }
 
@@ -239,7 +243,7 @@ namespace TapRelay
                 if (_listeners.TryRemove(key, out var stale))
                 {
                     stale.Dispose();
-                    _log("claude-haha permission listener detached session=" + key);
+                    _detailLog("claude-haha permission listener detached session=" + key);
                 }
             }
         }
@@ -282,6 +286,8 @@ namespace TapRelay
             private readonly int _port;
             private readonly NotifyServer _server;
             private readonly Action<string> _log;
+            // 重连属于实现细节，走诊断通道；回写失败（_log）仍是用户需要看到的事件。
+            private readonly Action<string> _detailLog;
             private readonly SemaphoreSlim _sendLock = new SemaphoreSlim(1, 1);
             private readonly CancellationTokenSource _stop = new CancellationTokenSource();
             private readonly HashSet<string> _announced = new HashSet<string>(StringComparer.Ordinal);
@@ -290,12 +296,18 @@ namespace TapRelay
             private Task? _loop;
             private int _disposed;
 
-            public SessionListener(string sessionId, int port, NotifyServer server, Action<string> log)
+            public SessionListener(
+                string sessionId,
+                int port,
+                NotifyServer server,
+                Action<string> log,
+                Action<string> detailLog)
             {
                 _sessionId = sessionId;
                 _port = port;
                 _server = server;
                 _log = log;
+                _detailLog = detailLog;
             }
 
             public void Start(CancellationToken outerToken)
@@ -386,7 +398,7 @@ namespace TapRelay
                     }
                     catch (Exception ex)
                     {
-                        _log("claude-haha permission listener session=" + _sessionId + " reconnecting: " + ex.Message);
+                        _detailLog("claude-haha permission listener session=" + _sessionId + " reconnecting: " + ex.Message);
                     }
                     finally
                     {

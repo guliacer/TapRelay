@@ -34,7 +34,10 @@ namespace TapRelay
                 Path.Combine(userProfile, ".claude", "projects"),
                 Path.Combine(userProfile, ".claude", "transcripts"),
                 Path.Combine(localAppData, "Doubao", "User Data", "sdk_storage", "log"),
-                Path.Combine(userProfile, ".workbuddy", "logs")
+                Path.Combine(userProfile, ".workbuddy", "logs"),
+                // WorkBuddyAI（国际版）独立配置目录 ~/.workbuddy-ai，
+                // 日志同样落在 logs 下、ACP 信号格式与国内版一致。
+                Path.Combine(userProfile, ".workbuddy-ai", "logs")
             };
 
             foreach (var item in AppInstallRoots.Snapshot())
@@ -97,7 +100,8 @@ namespace TapRelay
                 || IsChatGPTSession(path)
                 || IsClaudeTranscript(path)
                 || IsDoubaoLog(path)
-                || IsWorkBuddyLog(path);
+                || IsWorkBuddyLog(path)
+                || IsWorkBuddyAiLog(path);
         }
 
         internal static bool IsTraeLog(string path)
@@ -143,6 +147,12 @@ namespace TapRelay
         internal static bool IsWorkBuddyLog(string path)
         {
             return IsInside(path, ".workbuddy/logs") &&
+                   string.Equals(Path.GetExtension(path), ".log", StringComparison.OrdinalIgnoreCase);
+        }
+
+        internal static bool IsWorkBuddyAiLog(string path)
+        {
+            return IsInside(path, ".workbuddy-ai/logs") &&
                    string.Equals(Path.GetExtension(path), ".log", StringComparison.OrdinalIgnoreCase);
         }
 

@@ -18,7 +18,8 @@ namespace TapRelay
                 return Truncate(provided);
             }
 
-            if (!string.Equals(source, "workbuddy", StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(source, "workbuddy", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(source, "workbuddy-ai", StringComparison.OrdinalIgnoreCase))
             {
                 return string.Empty;
             }
@@ -26,7 +27,9 @@ namespace TapRelay
             var displayName = (fallbackDisplayName ?? string.Empty).Trim();
             if (displayName.Length == 0)
             {
-                displayName = "WorkBuddy";
+                displayName = string.Equals(source, "workbuddy-ai", StringComparison.OrdinalIgnoreCase)
+                    ? "WorkBuddy AI"
+                    : "WorkBuddy";
             }
 
             var stateTitle = (status ?? string.Empty).Trim().ToLowerInvariant() switch

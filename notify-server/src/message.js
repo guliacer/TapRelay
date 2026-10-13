@@ -72,7 +72,7 @@ export function normalizeCredits(value) {
   return typeof value === "string" ? value.trim().slice(0, MAX_CREDITS_LENGTH) : "";
 }
 
-/** 会话 ID 用于手机端"继续"续接会话；去空白并截断到 160 字符。 */
+/** 会话 ID 用于任务关联和停止控制；去空白并截断到 160 字符。 */
 function normalizeSessionId(value) {
   const maxSessionIdLength = 160;
   return typeof value === "string" ? value.trim().slice(0, maxSessionIdLength) : "";

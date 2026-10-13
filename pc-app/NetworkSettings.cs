@@ -214,7 +214,7 @@ namespace TapRelay
                     var config = JsonSerializer.Deserialize<NotifyServerConfig>(File.ReadAllText(SettingsPath));
                     if (config != null)
                     {
-                        return config.Normalize();
+                        return PinPort(config.Normalize());
                     }
                 }
             }
@@ -224,7 +224,23 @@ namespace TapRelay
                 // from opening; fall back to the safe all-interface LAN default.
             }
 
-            return new NotifyServerConfig().Normalize();
+            return PinPort(new NotifyServerConfig().Normalize());
+        }
+
+        /// <summary>
+        /// 铁律 R2：端口不可漂移。手机端把 1122 写死在代码里，服务端必须固定监听 1122，
+        /// 因此历史配置文件里遗留的其他端口一律忽略。
+        /// <para>
+        /// 固定动作放在「配置入口」而不是 <c>NotifyServer</c> 内部：服务只负责按给定配置监听，
+        /// 这样测试仍能用独立端口起一个真实的服务实例，不会和开发机上正在运行的实例抢 1122。
+        /// 生产路径全部经由本方法取配置，R2 依然成立。
+        /// </para>
+        /// </summary>
+        private static NotifyServerConfig PinPort(NotifyServerConfig config)
+        {
+            config.ListenPort = NotifyServerConfig.DefaultPort;
+            config.AdvertisedPort = NotifyServerConfig.DefaultPort;
+            return config;
         }
 
         internal static void Save(NotifyServerConfig config)

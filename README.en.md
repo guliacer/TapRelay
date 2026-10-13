@@ -10,6 +10,25 @@
 
 </div>
 
+## Project Overview
+
+<div align="center">
+<table>
+  <tr>
+    <td align="center" valign="top">
+      <img src="./assets/readme/pc-overview.png" alt="TapRelay PC main window with service status, notification apps, and runtime logs" width="560" />
+      <br />
+      <sub>PC: manage the relay service, app integrations, and task logs</sub>
+    </td>
+    <td align="center" valign="top">
+      <img src="./assets/readme/android-device-management.jpg" alt="TapRelay Android device management screen with device name and connection status" width="280" />
+      <br />
+      <sub>Android: configure the device and receive PC task notifications</sub>
+    </td>
+  </tr>
+</table>
+</div>
+
 TapRelay is a local-first task notification relay. Local agents, desktop tools, and scripts report task completion, failure, or input-required events to a Windows PC. The PC then relays them to an Android device over WebSocket on the same trusted network.
 
 > The default route is local only: `Agent / Hook / local logs -> TapRelay PC -> Android`. There is no authentication or transport encryption by default. Never expose port `1122` directly to the public Internet.
@@ -17,26 +36,9 @@ TapRelay is a local-first task notification relay. Local agents, desktop tools, 
 ## Screenshots
 
 <div align="center">
-  <img src="./assets/readme/pc-main.png" alt="TapRelay PC main window" width="720" />
+  <img src="./assets/readme/android-main.png" alt="TapRelay Android message history" width="320" />
   <br />
-  <sub>PC service, connection, test message, and notification-source view</sub>
-</div>
-
-<div align="center">
-<table>
-  <tr>
-    <td align="center">
-      <img src="./assets/readme/android-main.png" alt="TapRelay Android message history" width="280" />
-      <br />
-      <sub>Android message history</sub>
-    </td>
-    <td align="center">
-      <img src="./assets/readme/android-device-settings.png" alt="TapRelay Android device settings" width="280" />
-      <br />
-      <sub>Device and permission management</sub>
-    </td>
-  </tr>
-</table>
+  <sub>Android message history for pushed task status and task logs</sub>
 </div>
 
 The screenshots were captured from the current PC application and an Android emulator during a real connection test. The PC endpoint is masked; `10.0.2.2` is the emulator host address.
@@ -87,13 +89,11 @@ Invoke-RestMethod -Uri "http://127.0.0.1:1122/send" `
 
 An HTTP success response only confirms submission to the PC. A positive client count and a new Android message confirm delivery to an online device. The service does not queue messages for offline devices.
 
-## Integration and Session Continuation
+## Integration and Monitoring
 
 All task sources eventually call `POST http://127.0.0.1:1122/send`. New integrations should provide the actual final result, error details, or the real question that needs input. Do not use a generic status string, a user prompt, or a conversation title as `taskLog`.
 
-The PC application includes local monitoring and/or continuation channels for Claude Code, Claude Code Haha, Codex/ChatGPT, TraeCode CN, TraeWork CN, ZCode, Doubao, WorkBuddy, OpenCode, DeepSeek Harness, Freebuff, and selected workflow or transfer tools. A built-in channel does not guarantee validation against every third-party app version; validate completed, failed, and waiting events in your own environment before relying on it.
-
-Phone-side continuation requires a reliable original `sessionId`, a usable PC proxy, and an available target application. The Android app sends `agent.call` with `session.send`; while offline it keeps only the latest unsent instruction. "Started" or "submitted" means the request reached the target channel, not that the agent has completed the task.
+The PC application includes local monitoring channels for Claude Code, Claude Code Haha, Codex/ChatGPT, TraeCode CN, TraeWork CN, ZCode, Doubao, WorkBuddy, OpenCode, DeepSeek Harness, Freebuff, and selected workflow or transfer tools. A built-in channel does not guarantee validation against every third-party app version; validate completed, failed, and waiting events in your own environment before relying on it. The Android notification cards do not provide a session-continuation button.
 
 Use the bundled scripts for Claude Code or Codex/ChatGPT configuration:
 
@@ -146,7 +146,8 @@ Content-Type: application/json
 
 ## Privacy and Limits
 
-- Android stores connection settings and the latest 100 messages locally. The PC only keeps connected clients in memory.
+- Android stores connection settings, the last 10 connection addresses (`host_history`) and the latest 100 messages locally. The PC only keeps connected clients in memory.
+- Android remembers connection addresses that were used successfully; **Device management** lists the last 10 (most recent first) so you can switch back without retyping. **Hide address** masks the address in the app UI, the history list and the system notification.
 - Notification, camera scanning, overlay, and background permissions are optional and should be granted only when required.
 - Do not send passwords, tokens, private keys, or full sensitive command arguments in task logs or approval summaries.
 - Do not use port forwarding, public firewall rules, or an unprotected reverse proxy for port `1122`.

@@ -14,15 +14,15 @@ using Microsoft.Win32;
 namespace TapRelay
 {
     /// <summary>
-    /// 閫氱煡搴旂敤绠＄悊闈㈡澘锛氬睍绀哄凡閫夐€氱煡搴旂敤鍥炬爣锛屾彁渚?鑷姩妫€娴?鍜?搴旂敤閫夋嫨"涓や釜鎿嶄綔鎸夐挳銆?
-    /// 甯冨眬锛?
-    /// - 绗竴鎺掞細宸插惎鐢ㄧ殑搴旂敤鍥炬爣 + 鍚嶇О锛堢偣鍑荤鐢紝鍥炬爣鍙樼伆锛?
-    /// - 绗簩鎺掞細[鑷姩妫€娴媇 [搴旂敤閫夋嫨] 涓や釜鎸夐挳
+    /// 通知应用管理面板：展示已选通知应用图标，提供【自动检测】和【应用选择】两个操作按钮。
+    /// 布局：
+    /// - 第一排：已启用的应用图标 + 名称（点击禁用，图标变灰）
+    /// - 第二排：[自动检测] [应用选择] 两个按钮
     /// </summary>
     internal sealed class NotificationAppsPanel : Panel
     {
         /// <summary>
-        /// 宸插惎鐢ㄧ殑閫氱煡搴旂敤銆俈alue = 鏄剧ず鍚嶇О銆傝绉婚櫎鍚庡浘鏍囧彉鐏颁笖涓嶅弬涓庨€氱煡鐩戝惉銆?
+        /// 已启用的通知应用。Value = 显示名称。被移除后图标变灰且不参与通知监听。
         /// </summary>
         private readonly Dictionary<string, AppEntry> _enabledApps =
             new Dictionary<string, AppEntry>(StringComparer.OrdinalIgnoreCase);
@@ -47,7 +47,7 @@ namespace TapRelay
         private static DateTime _appxPackagesCheckedAtUtc = DateTime.MinValue;
         private static string[] _appxPackageNames = Array.Empty<string>();
 
-        // AgentCompletionMonitor 瀹為檯鏀寔鐨勫閮ㄩ€氱煡鏉ユ簮銆俆apRelay 浠呮槸 PC 绔嚜韬殑娴嬭瘯鏉ユ簮銆?
+        // AgentCompletionMonitor 实际支持的外部通知来源。TapRelay 仅是 PC 端自身的测试来源。
         private static readonly HashSet<string> NotifiableAppKeys =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
@@ -63,6 +63,7 @@ namespace TapRelay
                 "quarknetdisk",
                 "adrive",
                 "workbuddy",
+                "workbuddy-ai",
                 "comfyui",
                 "opencode",
                 "deepseekharness",
@@ -74,11 +75,13 @@ namespace TapRelay
         // 每个分区 = 标题行 + 芯片网格容器 + 独立垂直滚动条，超过可视行数时滚动查看。
         private readonly AppSectionPanel _installedGroup = new AppSectionPanel();
         private readonly Label _installedHeader = new Label();
+        private readonly Label _installedEmptyLabel = new Label();
         private readonly Panel _installedChips = new Panel();
         private readonly ThemedScrollBar _installedScroll = new ThemedScrollBar();
 
         private readonly AppSectionPanel _uninstalledGroup = new AppSectionPanel();
         private readonly Label _uninstalledHeader = new Label();
+        private readonly Label _uninstalledEmptyLabel = new Label();
         private readonly Panel _uninstalledChips = new Panel();
         private readonly ThemedScrollBar _uninstalledScroll = new ThemedScrollBar();
         private bool _uninstalledCollapsed = true;
@@ -97,14 +100,20 @@ namespace TapRelay
         private Color _borderColor = Color.FromArgb(216, 228, 222);
         private Color _accentColor = Color.FromArgb(111, 134, 126);
 
-        // 图标芯片布局常量：紧凑尺寸，保留 56px 高度的稳定点击目标，
-        // 同时在默认窗口宽度下完整容纳八列，避免呈现为启动器式的大图标墙。
-        private const int ChipWidth = 88;
-        private const int ChipHeight = 56;
+        // 图标芯片布局常量。应用目录是首页的次级信息，保持清晰但不再占用过多纵向空间：
+        // 38px 图标 + 3px 间距 + 两行 8.5pt 文字，72px 足够承载长名称。
+        // 若压到 64px，名称区只剩 21px，长名（如 DeepSeek Harness）会被截成一行省略号。
+        // 列数由 BalancedColumns 决定，不是固定值：MaxPerRow = 8 只是上限，
+        // 实际列数 = ceil(n / ceil(n / 8))，再受可用宽度（Width - 2*AppsRowLeft）限制。
+        // 因此 12 个应用排成 2 行 × 6，13 个排成 2 行 × 7/6，都在 MaxVisibleRows = 2 之内。
+        // 宽度上界是 8 列 × 96 = 768px，默认窗口宽度下不会触顶；也就是说
+        // ChipWidth 只要不超过 96，就不会因为列数被宽度压小而多出一行。
+        private const int ChipWidth = 94;
+        private const int ChipHeight = 72;
         private const int IconNameGap = 3;
         private const int ChipGapX = 0;
-        private const int ChipGapY = 8;
-        private const float AppNameFontSize = 8.2F;
+        private const int ChipGapY = 6;
+        private const float AppNameFontSize = UiTokens.AppNameFontSize;
         private const int AppsRowLeft = 12;
         private const int ContentTopInset = 4;
         private const int MinPerRow = 4;
@@ -113,18 +122,22 @@ namespace TapRelay
         private const int MaxVisibleRows = 2;
         // 分区标题行使用固定高度，让文字可在标题带中垂直居中，并与上方分隔线留出安全距离。
         private const int GroupHeaderHeight = 30;
-        private const int GroupGap = 12;
+        private const int GroupGap = UiTokens.RowGap;
         private const int HintTopGap = 10;
         private const int ContentBottomInset = 10;
-        // 高度预算不足时，单个分区允许压到的最小可视高度。取半行多一点：
-        // 能看到图标上半部分，用户可判断"这里还有内容、需要滚动"。
-        // 不允许再降到 0，否则分区会变成一条只有滚动条的空行。
-        private const int MinRowVisible = 32;
+        // 高度预算不足时，单个分区仍至少完整显示一行图标与应用名称。
+        // 只显示图标会让“已适配应用（未安装）”无法区分具体应用；超过可视高度
+        // 的内容继续通过分区内滚动查看。
+        private const int MinRowVisible = ChipHeight + ChipGapY;
 
         // 外层允许本面板占用的最大高度。MainForm 在重排时按"运行日志区最小高度"
         // 反推该值，面板据此收缩每个分区的可见行数并改用分区内滚动，
         // 保证展开未安装区或窗口变矮时都不会把运行日志顶出可视范围。
         private int _maxContentHeight = int.MaxValue;
+
+        // 外层希望本面板至少占用的高度。窗口比内容高时（常见于图标很少的机器），
+        // 多出来的空间留在面板内部，而不是在窗口底部露出一条窗体底色的空白带。
+        private int _fillHeight;
 
         /// <summary>
         /// 除芯片行以外的固定开销：上边距 + 两个分区标题 + 分区间距 + 末行提示。
@@ -146,6 +159,11 @@ namespace TapRelay
             {
                 // 计算可用宽度（扣除左右边距）
                 var availableWidth = Math.Max(1, Width - 2 * AppsRowLeft);
+                if (_installedChips.Controls.Count == 0)
+                {
+                    return UiTokens.EmptyStateHeight;
+                }
+
                 return Math.Max(
                     MinRowVisible,
                     Math.Min(ComputeRows(_installedChips.Controls.Count, availableWidth), MaxVisibleRows) * (ChipHeight + ChipGapY));
@@ -184,8 +202,33 @@ namespace TapRelay
         }
 
         /// <summary>
-        /// 宸查€夐€氱煡搴旂敤闆嗗悎鍙樺寲鏃惰Е鍙戯紝鍙傛暟涓哄綋鍓嶅惎鐢ㄧ殑搴旂敤鏍囪瘑鍒楄〃銆?
-        /// AgentCompletionMonitor 鎹鍔ㄦ€佽皟鏁寸洃鍚洰褰曘€?
+        /// 外层希望本面板至少占用的高度（像素）。
+        /// <para>
+        /// 与 <see cref="MaxContentHeight"/> 的区别：后者是"最多能长多高"（超出则分区内滚动），
+        /// 本值是最低要撑到多高。窗口底部若还有富余空间，就由面板吸收——芯片区仍在顶部，
+        /// 提示行钉在面板底部，于是这块空间读作卡片内部的留白，而不是窗口底部一条灰色空白。
+        /// </para>
+        /// 传 0 表示不强制撑高（按内容高度）。
+        /// </summary>
+        public int FillHeight
+        {
+            get => _fillHeight;
+            set
+            {
+                var clamped = Math.Max(0, value);
+                if (_fillHeight == clamped)
+                {
+                    return;
+                }
+
+                _fillHeight = clamped;
+                EnsureGridHeight();
+            }
+        }
+
+        /// <summary>
+        /// 已选通知应用集合变化时触发，参数为当前启用的应用标识列表。
+        /// AgentCompletionMonitor 据此动态调整监听目录。
         /// </summary>
         public event Action<IReadOnlyList<string>>? EnabledAppsChanged;
 
@@ -225,14 +268,37 @@ namespace TapRelay
             BuildGroup(_uninstalledGroup, _uninstalledHeader, _uninstalledChips, _uninstalledScroll,
                 "▸ 已适配应用（未安装）", true);
 
+            ConfigureEmptyState(
+                _installedEmptyLabel,
+                "暂无已检测到的应用\r\n点击“自动检测”或“应用选择”添加");
+            ConfigureEmptyState(
+                _uninstalledEmptyLabel,
+                "暂无未安装的适配应用");
+            _installedGroup.Controls.Add(_installedEmptyLabel);
+            _uninstalledGroup.Controls.Add(_uninstalledEmptyLabel);
+
             Controls.Add(_hintLabel);
             Controls.Add(_installedGroup);
             Controls.Add(_uninstalledGroup);
             _installedScroll.BringToFront();
             _uninstalledScroll.BringToFront();
+            _installedEmptyLabel.BringToFront();
+            _uninstalledEmptyLabel.BringToFront();
             _hintLabel.BringToFront();
 
             EnsureGridHeight();
+        }
+
+        private void ConfigureEmptyState(Label label, string text)
+        {
+            label.AutoSize = false;
+            label.Font = new Font(UiTokens.UiFontFamily, UiTokens.CaptionFontSize);
+            label.ForeColor = _textSecondary;
+            label.BackColor = Color.Transparent;
+            label.Text = text;
+            label.TextAlign = ContentAlignment.MiddleLeft;
+            label.Visible = false;
+            label.TabStop = false;
         }
 
         /// <summary>
@@ -299,8 +365,9 @@ namespace TapRelay
         /// <summary>
         /// 重排两个分区。可用于放芯片的高度是一个预算：
         /// <see cref="MaxContentHeight"/> 扣除标题行和间距后的余量，
-        /// 优先分给已安装区（用户主要操作对象），剩余给展开的未安装区；
-        /// 任一分区拿到的高度低于其内容高度时，该分区内部出现垂直滚动条。
+        /// 先完整保留已安装区，再把剩余空间分给展开的未安装区；
+        /// 未安装区拿到的高度低于其内容高度时，该分区内部出现垂直滚动条。
+        /// 已安装区绝不压缩到半行，避免下面的未安装区遮挡其第二行。
         /// 通过 <see cref="PreferredHeightChanged"/> 把最终高度通知外层。
         /// </summary>
         private void EnsureGridHeight()
@@ -331,28 +398,33 @@ namespace TapRelay
                 ? 0
                 : ComputeRows(_uninstalledChips.Controls.Count, availableWidth);
 
-            // 可分给芯片行的高度预算 = 上限扣掉固定开销。下限是"每个可见分区一段
-            // 最小可视区"，与 MinContentHeight 同一套算法，保证面板永不超出上限。
-            var visibleGroups = uninstalledRows > 0 ? 2 : 1;
-            var budget = Math.Max(MinRowVisible * visibleGroups, _maxContentHeight - ChromeHeight);
+            // 可分给芯片行的高度预算 = 上限扣掉固定开销。这里保留一个完整的
+            // 最小未安装分区，以便展开标题后仍有可见内容；若外层窗口暂时太矮，
+            // MaxContentHeight 会在随后由 MainForm 的最小高度协商拉高。
+            var installedWanted = installedRows == 0
+                ? UiTokens.EmptyStateHeight
+                : Math.Min(installedRows, MaxVisibleRows) * rowHeight;
+            var uninstalledWanted = _uninstalledCollapsed
+                ? 0
+                : uninstalledRows == 0
+                    ? UiTokens.EmptyStateHeight
+                    : Math.Min(uninstalledRows, MaxVisibleRows) * rowHeight;
 
-            var installedWanted = Math.Min(installedRows, MaxVisibleRows) * rowHeight;
-            var uninstalledWanted = Math.Min(uninstalledRows, MaxVisibleRows) * rowHeight;
+            var budget = Math.Max(0, _maxContentHeight - ChromeHeight);
 
-            // 预算不足时先压缩未安装区，再压缩已安装区，各自压到 MinRowVisible 为止。
-            // 压缩后分区内容高度大于可视高度，LayoutGrid 会自动显示分区滚动条。
+            // 已安装区是主操作区，必须按完整行数保留。即使窗口当前高度还没有
+            // 来得及被 MainForm 拉高，也先让面板自然变高，不能用裁剪来“满足预算”。
             var installedVisibleHeight = installedWanted;
-            var uninstalledVisibleHeight = uninstalledWanted;
-            var overflow = installedWanted + uninstalledWanted - budget;
-            if (overflow > 0 && uninstalledVisibleHeight > 0)
+            var uninstalledVisibleHeight = 0;
+            if (!_uninstalledCollapsed)
             {
-                var reduce = Math.Min(overflow, Math.Max(0, uninstalledVisibleHeight - MinRowVisible));
-                uninstalledVisibleHeight -= reduce;
-                overflow -= reduce;
-            }
-            if (overflow > 0 && installedVisibleHeight > MinRowVisible)
-            {
-                installedVisibleHeight -= Math.Min(overflow, installedVisibleHeight - MinRowVisible);
+                // MinContentHeight 对展开态同样预留一整行，保持这里与窗口最小高度
+                // 协商使用同一规则。未安装区超出可视高度时由 LayoutGrid 滚动。
+                var uninstalledRequired = Math.Max(MinRowVisible, uninstalledWanted);
+                var remainingBudget = Math.Max(0, budget - installedVisibleHeight);
+                uninstalledVisibleHeight = Math.Max(
+                    MinRowVisible,
+                    Math.Min(uninstalledRequired, remainingBudget));
             }
 
             var installedTop = ContentTopInset;
@@ -360,8 +432,13 @@ namespace TapRelay
             _installedGroup.Size = new Size(Width, GroupHeaderHeight + installedVisibleHeight);
             _installedHeader.Size = new Size(Math.Max(1, Width - AppsRowLeft), GroupHeaderHeight);
             _installedHeader.Location = new Point(AppsRowLeft, 0);
-            _installedHeader.Text = BuildGroupTitle("\u5df2\u5b89\u88c5\u5e94\u7528", _installedChips.Controls.Count);
+            _installedHeader.Text = BuildEnabledTitle(_installedChips);
             _installedChips.Size = new Size(Width - 2 * AppsRowLeft, installedVisibleHeight);
+            _installedEmptyLabel.Location = new Point(AppsRowLeft, GroupHeaderHeight);
+            _installedEmptyLabel.Size = new Size(
+                Math.Max(80, Width - 2 * AppsRowLeft),
+                installedVisibleHeight);
+            _installedEmptyLabel.Visible = _installedChips.Controls.Count == 0;
             LayoutGrid(_installedChips, _installedScroll, installedRows, installedVisibleHeight, false);
 
             var uninstalledTop = _installedGroup.Bottom + GroupGap;
@@ -375,6 +452,11 @@ namespace TapRelay
             _uninstalledChips.Size = new Size(Width - 2 * AppsRowLeft, Math.Max(1, uninstalledVisibleHeight));
             _uninstalledChips.Visible = !_uninstalledCollapsed;
             _uninstalledScroll.Visible = !_uninstalledCollapsed;
+            _uninstalledEmptyLabel.Location = new Point(AppsRowLeft, GroupHeaderHeight);
+            _uninstalledEmptyLabel.Size = new Size(
+                Math.Max(80, Width - 2 * AppsRowLeft),
+                Math.Max(1, uninstalledVisibleHeight));
+            _uninstalledEmptyLabel.Visible = !_uninstalledCollapsed && _uninstalledChips.Controls.Count == 0;
             if (!_uninstalledCollapsed)
             {
                 LayoutGrid(_uninstalledChips, _uninstalledScroll, uninstalledRows, uninstalledVisibleHeight, true);
@@ -386,6 +468,17 @@ namespace TapRelay
                 0);
 
             var height = _hintLabel.Bottom + ContentBottomInset;
+
+            // 富余空间由面板吸收：把提示行钉到底部，芯片区保持顶部对齐，
+            // 中间那段空白读作卡片内留白。这样窗口底部不会留下一条窗体底色的空白带。
+            if (_fillHeight > height)
+            {
+                _hintLabel.Location = new Point(
+                    AppsRowLeft,
+                    _fillHeight - ContentBottomInset - _hintLabel.Height);
+                height = _fillHeight;
+            }
+
             if (Height != height)
             {
                 Height = height;
@@ -397,6 +490,18 @@ namespace TapRelay
         private static string BuildGroupTitle(string baseTitle, int count)
         {
             return baseTitle + " " + count;
+        }
+
+        /// <summary>
+        /// 已安装分区的标题：「已启用 N / M」。N 为当前参与通知监听的应用数，M 为已安装总数。
+        /// 原实现只显示总数，用户看不出「装是装了、但有几个真在监听」——而这恰恰是
+        /// 本分区最该先回答的问题，也是方案 B 把状态信息前移的一部分。
+        /// </summary>
+        private static string BuildEnabledTitle(Panel chips)
+        {
+            var total = chips.Controls.Count;
+            var enabled = chips.Controls.OfType<AppChip>().Count(c => c.Enabled);
+            return "\u5df2\u542f\u7528 " + enabled + " / " + total;
         }
 
         private static int ComputeRows(int count, int availableWidth = int.MaxValue)
@@ -541,6 +646,7 @@ namespace TapRelay
                 "quarknetdisk" => "ic_quarknetdisk_logo.png",
                 "adrive" => "ic_adrive_logo.png",
                 "workbuddy" => "ic_workbuddy_logo.png",
+                "workbuddy-ai" => "ic_workbuddy_ai_logo.png",
                 "comfyui" => "ic_comfyui_logo.png",
                 "opencode" => "ic_opencode_logo.png",
                 "deepseekharness" => "ic_deepseekharness_logo.png",
@@ -620,7 +726,8 @@ namespace TapRelay
                 "baidunetdisk" => Color.FromArgb(54, 119, 246),
                 "quarknetdisk" => Color.FromArgb(78, 110, 242),
                 "adrive" => Color.FromArgb(255, 143, 45),
-                "workbuddy" => Color.FromArgb(99, 81, 241),
+                "workbuddy" => Color.FromArgb(0, 188, 144),
+                "workbuddy-ai" => Color.FromArgb(16, 198, 166),
                 "comfyui" => Color.FromArgb(242, 255, 89),
                 "opencode" => Color.FromArgb(244, 244, 245),
                 "deepseekharness" => Color.FromArgb(77, 107, 254),
@@ -705,6 +812,8 @@ namespace TapRelay
             _hintLabel.ForeColor = textSecondary;
             _installedHeader.ForeColor = textPrimary;
             _uninstalledHeader.ForeColor = textPrimary;
+            _installedEmptyLabel.ForeColor = textSecondary;
+            _uninstalledEmptyLabel.ForeColor = textSecondary;
             _installedGroup.ApplyTheme(_sectionSurfaceColor, border, accent);
             _uninstalledGroup.ApplyTheme(_sectionSurfaceColor, border, textSecondary);
 
@@ -737,12 +846,12 @@ namespace TapRelay
             {
                 if (c is AppChip chip)
                 {
-                    chip.ApplyTheme(_chipSurfaceColor, _textPrimary, _textSecondary, _borderColor);
+                    chip.ApplyTheme(_chipSurfaceColor, _textPrimary, _textSecondary, _borderColor, _accentColor);
                 }
             }
         }
         /// <summary>
-        /// 鎵归噺娣诲姞宸插惎鐢ㄥ簲鐢ㄣ€傚垵濮嬬姸鎬佸叏閮ㄥ惎鐢紙褰╄壊鍥炬爣锛夈€?
+        /// 批量添加已启用应用。初始状态全部启用（彩色图标）。
         /// </summary>
         public void SetEnabledApps(IEnumerable<AppEntry> apps)
         {
@@ -850,7 +959,7 @@ namespace TapRelay
                 {
                     Margin = new Padding(0, 0, ChipGapX, ChipGapY)
                 };
-                chip.ApplyTheme(_chipSurfaceColor, _textPrimary, _textSecondary, _borderColor);
+                chip.ApplyTheme(_chipSurfaceColor, _textPrimary, _textSecondary, _borderColor, _accentColor);
                 var tooltip = AppCatalogMetadata.GetTooltipText(key);
                 if (!string.IsNullOrWhiteSpace(tooltip))
                 {
@@ -891,6 +1000,26 @@ namespace TapRelay
         /// </summary>
         internal static bool HasInstallEvidence(string appKey)
         {
+            // 证据只证明"装过"，签名校验进一步证明"装得完整"：
+            // 磁盘/注册表证据命中后必须通过安装签名（启动文件 + 必须文件齐全），
+            // 缺核心文件的残缺安装按未安装处理（ZCode 空目录实证：exe/目录在
+            // ≠ 程序可用）。无签名约束的应用（CLI 型、自定义注册应用）不拦截。
+            return TryFindInstallEvidence(appKey, out var installRoot) &&
+                   (!AppInstallSignature.HasSignature(appKey) ||
+                    installRoot == null ||
+                    AppInstallSignature.IsComplete(appKey, installRoot));
+        }
+
+        /// <summary>
+        /// 查找 appKey 的当前安装证据。命中磁盘/注册表证据时通过
+        /// <paramref name="installRoot"/> 返回安装根供签名校验；进程证据
+        /// 命中时 installRoot 为 null——进程正从磁盘上的真实安装运行，
+        /// 签名豁免（兼容 AllAppsE2E 在可信根下的进程 stub 与"运行中即
+        /// 安装"语义）。
+        /// </summary>
+        private static bool TryFindInstallEvidence(string appKey, out string? installRoot)
+        {
+            installRoot = null;
             var key = (appKey ?? string.Empty).Trim().ToLowerInvariant();
             if (key.Length == 0 || !IsNotifiableAppKey(key))
             {
@@ -911,62 +1040,74 @@ namespace TapRelay
                     return HasDesktopInstallSignal(key, userProfile, appData, localAppData, programFiles,
                         "claude", "Claude", "Claude Code");
                 case "claude-haha":
-                    return HasDesktopInstallSignal(key, userProfile, appData, localAppData, programFiles,
-                        "claude-haha", "Claude Code Haha", "Claude Code Haha");
+                    return TryFindDesktopInstallRoot(key, userProfile, appData, localAppData, programFiles,
+                        out installRoot, "claude-haha", "Claude Code Haha", "Claude Code Haha");
                 case "codex":
                     return HasDesktopInstallSignal(key, userProfile, appData, localAppData, programFiles,
                         "ChatGPT", "Codex", "OpenAI.Codex");
                 case "trae":
-                    return IsTraeInstalled(false);
+                    return TryFindTraeInstallRoot(false, programFiles, localAppData, out installRoot);
                 case "traework":
-                    return IsTraeInstalled(true);
+                    return TryFindTraeInstallRoot(true, programFiles, localAppData, out installRoot);
                 case "zcode":
-                    return HasDesktopInstallSignal(key, userProfile, appData, localAppData, programFiles,
-                        "zcode", "ZCode");
+                    return TryFindDesktopInstallRoot(key, userProfile, appData, localAppData, programFiles,
+                        out installRoot, "zcode", "ZCode");
                 case "doubao":
-                    return HasDesktopInstallSignal(key, userProfile, appData, localAppData, programFiles,
-                        "Doubao", "豆包") ||
-                           HasExecutableInRoot(Path.Combine(localAppData, "Doubao", "Application", "app"),
-                               "Doubao.exe");
+                    return TryFindDesktopInstallRoot(key, userProfile, appData, localAppData, programFiles,
+                               out installRoot, "Doubao", "豆包") ||
+                           TryExecutableRoot(Path.Combine(localAppData, "Doubao", "Application"),
+                               out installRoot, "Doubao.exe");
                 case "suyan":
-                    return SuyanAppLocator.IsInstalled();
+                    return TryFindSuyanInstallRoot(out installRoot);
                 case "baidunetdisk":
-                    return HasDesktopInstallSignal(key, userProfile, appData, localAppData,
-                        programFiles, "BaiduNetdisk", "百度网盘");
+                    return TryFindDesktopInstallRoot(key, userProfile, appData, localAppData,
+                        programFiles, out installRoot, "BaiduNetdisk", "百度网盘");
                 case "quarknetdisk":
-                    return HasDesktopInstallSignal(key, userProfile, appData, localAppData,
-                        programFiles, "QuarkCloudDrive", "夸克网盘");
+                    return TryFindDesktopInstallRoot(key, userProfile, appData, localAppData,
+                        programFiles, out installRoot, "QuarkCloudDrive", "夸克网盘");
                 case "adrive":
-                    return HasDesktopInstallSignal(key, userProfile, appData, localAppData,
-                        programFiles, "aDrive", "阿里云盘");
+                    return TryFindDesktopInstallRoot(key, userProfile, appData, localAppData,
+                        programFiles, out installRoot, "aDrive", "阿里云盘");
                 case "workbuddy":
-                    return HasDesktopInstallSignal(key, userProfile, appData, localAppData,
-                        programFiles, "WorkBuddy");
+                    // WorkBuddy 国内版：独立进程、安装包和用户数据目录。
+                    // ~/.workbuddy/logs 日志目录卸载后仍残留，不能作为安装证据。
+                    return TryFindDesktopInstallRoot(key, userProfile, appData, localAppData,
+                        programFiles, out installRoot, "WorkBuddy");
+                case "workbuddy-ai":
+                    // WorkBuddy AI 国际版：不能复用 WorkBuddy 的安装证据，否则
+                    // 两个版本会在面板中互相冒充已安装。
+                    // ~/.workbuddy-ai/logs 日志目录卸载后仍残留，不能作为安装证据；
+                    // 国际版可装在任意盘，注册表（DisplayIcon 指向存在的 exe）不限于盘符。
+                    return TryFindDesktopInstallRoot(key, userProfile, appData, localAppData,
+                        programFiles, out installRoot, "WorkBuddyAI", "WorkBuddy AI");
                 case "opencode":
-                    return HasDesktopInstallSignal(key, userProfile, appData, localAppData,
-                        programFiles, "OpenCode") ||
-                           HasAnyExecutableInRoot(Path.Combine(localAppData, "Programs", "@opencode"));
+                    // 只认桌面版证据。npm 全局 CLI shim(%APPDATA%\npm\opencode.cmd)
+                    // 卸载桌面版后仍可能残留,不能据此判定"已安装"。
+                    return TryFindDesktopExecutableOnly(key, localAppData, programFiles, out installRoot,
+                               "OpenCode.exe") ||
+                           TryFindAnyExecutableRoot(Path.Combine(localAppData, "Programs", "@opencode"),
+                               out installRoot);
                 case "deepseekharness":
-                    return HasDesktopInstallSignal(key, userProfile, appData, localAppData,
-                        programFiles, "DeepSeek Harness Desktop", "DeepSeek Harness",
+                    return TryFindDesktopInstallRoot(key, userProfile, appData, localAppData,
+                        programFiles, out installRoot, "DeepSeek Harness Desktop", "DeepSeek Harness",
                         "DeepSeek Harness Desktop.exe");
                 case "freebuff":
-                    return HasDesktopInstallSignal(key, userProfile, appData, localAppData,
-                        programFiles, "Freebuff") || FreebuffDataLocator.IsInstalled();
+                    return TryFindDesktopInstallRoot(key, userProfile, appData, localAppData,
+                               programFiles, out installRoot, "Freebuff") ||
+                           TryFreebuffInstallRoot(out installRoot);
                 case "comfyui":
-                    return DetectComfyUI(new DetectionResult(), userProfile, programFiles) ||
-                           AdaptedProcessGate.IsAnyProcessRunning(new[] { "ComfyNexus", "ComfyUI" });
+                    return TryFindComfyUiInstallRoot(userProfile, programFiles, out installRoot);
                 case "leigod":
                     return AdaptedProcessGate.IsAnyProcessRunning(new[] { "LeiGod", "leigod" }) ||
-                           HasExecutableInRoot(
+                           TryExecutableRoot(
                                Environment.ExpandEnvironmentVariables(@"%PROGRAMFILES(X86)%\LeiGod_Acc"),
-                               "leigod.exe", "LeiGod.exe") ||
-                           HasExecutableInRoot(
+                               out installRoot, "leigod.exe", "LeiGod.exe") ||
+                           TryExecutableRoot(
                                AppInstallRoots.Get(key),
-                               "leigod.exe", "LeiGod.exe");
+                               out installRoot, "leigod.exe", "LeiGod.exe");
                 default:
                     // 自定义应用也必须有当前可执行文件；仅剩一个卸载后的空目录
-                    // 或注册表元数据不能继续显示为“已安装”。
+                    // 或注册表元数据不能继续显示为“已安装”。无签名约束，不拦截。
                     return HasAnyExecutableInRoot(AppInstallRoots.Get(key));
             }
         }
@@ -1021,11 +1162,414 @@ namespace TapRelay
         }
 
         /// <summary>
+        /// <see cref="HasDesktopInstallSignal"/> 的安装根输出版本，供签名校验。
+        /// 进程证据命中时根为 null（进程豁免签名）；磁盘/注册表证据命中时返回
+        /// 证据所在的安装根。CLI shim / APPX 命中时无固定安装根概念，根为 null，
+        /// 对有签名约束的应用按"根未知不拦截"处理。
+        /// </summary>
+        private static bool TryFindDesktopInstallRoot(
+            string appKey,
+            string userProfile,
+            string appData,
+            string localAppData,
+            string programFiles,
+            out string? installRoot,
+            params string[] displayAndExecutableNames)
+        {
+            installRoot = null;
+            var roots = BuildTrustedInstallRoots(appKey, localAppData, programFiles);
+
+            // 进程证据：正从磁盘上的真实安装运行，豁免签名（兼容 E2E 进程 stub）。
+            if (AdaptedProcessGate.IsRunningFromTrustedRoot(appKey, roots))
+            {
+                return true;
+            }
+
+            var executableNames = displayAndExecutableNames
+                .Where(name => !string.IsNullOrWhiteSpace(name) &&
+                               name.IndexOf('\\') < 0 && name.IndexOf('/') < 0)
+                .Select(name => name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? name : name + ".exe")
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            // 磁盘证据：可信根（含一层子目录）里命中 exe，返回其所在目录。
+            foreach (var root in roots)
+            {
+                if (string.IsNullOrWhiteSpace(root)) continue;
+                if (TryExecutableRoot(root, out installRoot, executableNames))
+                {
+                    return true;
+                }
+            }
+
+            // CLI shim / APPX / 卸载注册表：证据成立但无统一安装根形态。
+            // 对注册表证据尝试解析 InstallLocation / DisplayIcon 所在目录，
+            // 解析失败保持 null（签名按"根未知不拦截"）。
+            foreach (var command in displayAndExecutableNames)
+            {
+                var commandName = command.Replace(" ", string.Empty);
+                if (HasCommandShim(commandName, userProfile, appData, localAppData))
+                {
+                    installRoot = null;
+                    return true;
+                }
+            }
+
+            var terms = displayAndExecutableNames
+                .Where(name => name.IndexOfAny(new[] { '\\', '/' }) < 0)
+                .ToArray();
+            if (HasAppxPackageForTerms(terms))
+            {
+                installRoot = null;
+                return true;
+            }
+            if (terms.Length > 0 &&
+                TryFindUninstallEntryRoot(displayName =>
+                    terms.Any(term => displayName.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0),
+                    out installRoot))
+            {
+                return true;
+            }
+            installRoot = null;
+            return false;
+        }
+
+        /// <summary>
+        /// 卸载注册表证据的安装根输出版本：InstallLocation 有效则用之，否则回退
+        /// DisplayIcon / UninstallString 引用的 exe 所在目录。
+        /// </summary>
+        private static bool TryFindUninstallEntryRoot(
+            Func<string, bool> displayNameMatches,
+            out string? installRoot)
+        {
+            installRoot = null;
+            foreach (var hive in new[] { Registry.CurrentUser, Registry.LocalMachine })
+            foreach (var keyPath in new[]
+            {
+                @"Software\Microsoft\Windows\CurrentVersion\Uninstall",
+                @"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+            })
+            {
+                try
+                {
+                    using var root = hive.OpenSubKey(keyPath);
+                    if (root == null) continue;
+                    foreach (var name in root.GetSubKeyNames())
+                    {
+                        using var app = root.OpenSubKey(name);
+                        if (app == null) continue;
+                        var displayName = Convert.ToString(app.GetValue("DisplayName")) ?? string.Empty;
+                        if (string.IsNullOrWhiteSpace(displayName) || !displayNameMatches(displayName))
+                        {
+                            continue;
+                        }
+
+                        var install = Convert.ToString(app.GetValue("InstallLocation")) ?? string.Empty;
+                        var displayIcon = Convert.ToString(app.GetValue("DisplayIcon")) ?? string.Empty;
+                        var uninstall = Convert.ToString(app.GetValue("UninstallString")) ?? string.Empty;
+                        if (HasLiveInstallLocation(install))
+                        {
+                            installRoot = install.Trim().Trim('"');
+                            return true;
+                        }
+                        foreach (var candidate in ExtractExecutableCandidates(displayIcon)
+                                     .Concat(ExtractExecutableCandidates(uninstall)))
+                        {
+                            try
+                            {
+                                if (!File.Exists(candidate)) continue;
+                                var directory = Path.GetDirectoryName(Path.GetFullPath(candidate));
+                                if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
+                                {
+                                    installRoot = directory;
+                                    return true;
+                                }
+                            }
+                            catch
+                            {
+                                // 该格式继续尝试。
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                    // 无法访问的注册表配置单元/子键：视为无证据。
+                }
+            }
+            return false;
+        }
+
+        /// <summary>root（含一层子目录）内存在任一 exe 时返回其所在目录。</summary>
+        private static bool TryExecutableRoot(string? root, out string? installRoot, params string[] executableNames)
+        {
+            installRoot = null;
+            if (string.IsNullOrWhiteSpace(root) || executableNames == null || executableNames.Length == 0)
+            {
+                return false;
+            }
+            try
+            {
+                if (!Directory.Exists(root)) return false;
+                foreach (var name in executableNames)
+                {
+                    if (string.IsNullOrWhiteSpace(name)) continue;
+                    if (File.Exists(Path.Combine(root, name)))
+                    {
+                        installRoot = root;
+                        return true;
+                    }
+                }
+                foreach (var child in Directory.EnumerateDirectories(root))
+                {
+                    foreach (var name in executableNames)
+                    {
+                        if (string.IsNullOrWhiteSpace(name)) continue;
+                        if (File.Exists(Path.Combine(child, name)))
+                        {
+                            installRoot = child;
+                            return true;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // 访问受限按无证据处理。
+            }
+            return false;
+        }
+
+        /// <summary>root 自身或其一层子目录存在任何 exe 时返回所在目录。</summary>
+        private static bool TryFindAnyExecutableRoot(string? root, out string? installRoot)
+        {
+            installRoot = null;
+            if (string.IsNullOrWhiteSpace(root)) return false;
+            try
+            {
+                if (!Directory.Exists(root)) return false;
+                if (Directory.EnumerateFiles(root, "*.exe", SearchOption.TopDirectoryOnly).Any())
+                {
+                    installRoot = root;
+                    return true;
+                }
+                foreach (var child in Directory.EnumerateDirectories(root))
+                {
+                    if (Directory.EnumerateFiles(child, "*.exe", SearchOption.TopDirectoryOnly).Any())
+                    {
+                        installRoot = child;
+                        return true;
+                    }
+                }
+            }
+            catch
+            {
+                // 访问受限按无证据处理。
+            }
+            return false;
+        }
+
+        /// <summary><see cref="IsTraeInstalled"/> 的安装根输出版本，供签名校验。</summary>
+        private static bool TryFindTraeInstallRoot(
+            bool traework,
+            string programFiles,
+            string localAppData,
+            out string? installRoot)
+        {
+            installRoot = null;
+            var appKey = traework ? "traework" : "trae";
+            var roots = BuildTrustedInstallRoots(appKey, localAppData, programFiles);
+
+            if (AdaptedProcessGate.IsRunningFromTrustedRoot(appKey, roots))
+            {
+                return true;
+            }
+
+            var executableNames = traework
+                ? new[] { "TRAE SOLO CN.exe", "TraeWork CN.exe" }
+                : new[] { "Trae CN.exe", "TraeCode CN.exe" };
+            foreach (var root in roots)
+            {
+                if (string.IsNullOrWhiteSpace(root)) continue;
+                if (TryExecutableRoot(root, out installRoot, executableNames))
+                {
+                    return true;
+                }
+            }
+
+            return traework
+                ? TryFindUninstallEntryRoot(
+                    dn => dn.IndexOf("trae", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                          (dn.IndexOf("solo", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                           dn.IndexOf("work", StringComparison.OrdinalIgnoreCase) >= 0),
+                    out installRoot)
+                : TryFindUninstallEntryRoot(
+                    dn => dn.IndexOf("trae", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                          dn.IndexOf("solo", StringComparison.OrdinalIgnoreCase) < 0 &&
+                          dn.IndexOf("work", StringComparison.OrdinalIgnoreCase) < 0,
+                    out installRoot);
+        }
+
+        /// <summary>素言安装根输出：打包形态根（release\win-unpacked）供签名校验。</summary>
+        private static bool TryFindSuyanInstallRoot(out string? installRoot)
+        {
+            installRoot = null;
+            foreach (var root in SuyanAppLocator.FindRoots())
+            {
+                if (File.Exists(Path.Combine(root, "素言.exe")) ||
+                    File.Exists(Path.Combine(root, "suyan.exe")))
+                {
+                    installRoot = root;
+                    return true;
+                }
+                var unpacked = Path.Combine(root, "release", "win-unpacked");
+                if (File.Exists(Path.Combine(unpacked, "素言.exe")) ||
+                    File.Exists(Path.Combine(unpacked, "suyan.exe")))
+                {
+                    installRoot = unpacked;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>Freebuff 安装根输出：只认桌面版 exe 与环境变量声明。</summary>
+        private static bool TryFreebuffInstallRoot(out string? installRoot)
+        {
+            installRoot = null;
+            if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("TAPRELAY_FREEBUFF_STATE_PATH")) ||
+                !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("FREEBUFF_DESKTOP_STATE_PATH")))
+            {
+                // 显式环境变量覆盖视为“用户已声明安装”；根未知不拦截签名。
+                return true;
+            }
+            var exe = Path.Combine(
+                AgentLogPaths.GetLocalApplicationDataRoot(),
+                "Programs",
+                "@codebufffreebuff-desktop",
+                "Freebuff.exe");
+            if (File.Exists(exe))
+            {
+                installRoot = Path.GetDirectoryName(exe);
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>ComfyUI 安装根输出：签名按 python_embeded + ComfyUI\main.py 校验。</summary>
+        private static bool TryFindComfyUiInstallRoot(string userProfile, string programFiles, out string? installRoot)
+        {
+            installRoot = null;
+            // 进程证据豁免签名（运行中即安装）。
+            if (AdaptedProcessGate.IsAnyProcessRunning(new[] { "ComfyNexus", "ComfyUI" }))
+            {
+                return true;
+            }
+
+            string? ProbeUnder(string parent)
+            {
+                foreach (var candidate in new[]
+                {
+                    parent,
+                    Path.Combine(parent, "ComfyUI"),
+                    Path.Combine(parent, "ComfyNexus"),
+                    Path.Combine(parent, "ComfyUI_windows_portable")
+                })
+                {
+                    if (IsComfyUIInstall(candidate)) return candidate;
+                    var nested = Path.Combine(candidate, "ComfyUI");
+                    if (IsComfyUIInstall(nested)) return nested;
+                }
+                return null;
+            }
+
+            foreach (var parent in new[]
+            {
+                programFiles,
+                Path.Combine(AgentLogPaths.GetLocalApplicationDataRoot(), "Programs"),
+                Path.Combine(userProfile, "Documents"),
+                Path.Combine(userProfile, "Downloads"),
+                Path.Combine(userProfile, "Desktop")
+            })
+            {
+                if (string.IsNullOrWhiteSpace(parent)) continue;
+                var hit = ProbeUnder(parent);
+                if (hit != null)
+                {
+                    installRoot = hit;
+                    return true;
+                }
+            }
+
+            foreach (var drive in DriveInfo.GetDrives())
+            {
+                if (drive.DriveType != DriveType.Fixed || !drive.IsReady) continue;
+                var root = drive.RootDirectory.FullName;
+                var hit = ProbeUnder(root);
+                if (hit != null)
+                {
+                    installRoot = hit;
+                    return true;
+                }
+                string[] topLevel;
+                try
+                {
+                    topLevel = Directory.GetDirectories(root);
+                }
+                catch
+                {
+                    continue;
+                }
+                foreach (var dir in topLevel)
+                {
+                    hit = ProbeUnder(dir);
+                    if (hit != null)
+                    {
+                        installRoot = hit;
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        /// <summary><see cref="HasDesktopExecutableOnly"/> 的安装根输出版本。</summary>
+        private static bool TryFindDesktopExecutableOnly(
+            string appKey,
+            string localAppData,
+            string programFiles,
+            out string? installRoot,
+            params string[] executableNames)
+        {
+            installRoot = null;
+            var roots = BuildTrustedInstallRoots(appKey, localAppData, programFiles);
+            foreach (var root in roots)
+            {
+                if (string.IsNullOrWhiteSpace(root)) continue;
+                if (TryExecutableRoot(root, out installRoot, executableNames))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
         /// 汇总判定“已安装”时信任的安装根：Program Files（含 x86）、
         /// %LOCALAPPDATA%\Programs（Electron 按用户安装的默认位置），以及用户
         /// 通过「应用选择」手动指定的安装根。日志目录、注册表元数据等可残留
         /// 数据一律不进此列表。
         /// </summary>
+        private static bool HasDesktopExecutableOnly(
+            string appKey,
+            string localAppData,
+            string programFiles,
+            params string[] executableNames)
+        {
+            var roots = BuildTrustedInstallRoots(appKey, localAppData, programFiles);
+            return HasExecutableInRoots(roots, executableNames);
+        }
+
         private static List<string?> BuildTrustedInstallRoots(
             string appKey,
             string localAppData,
@@ -1204,6 +1748,9 @@ namespace TapRelay
                         _disabledKeys.Add(key);
                     }
                     SaveDisabledKeys();
+                    // 方案 B：分区标题现在显示「已启用 N / M」，启停后必须重排才能刷新计数。
+                    // EnsureGridHeight 自身有 _layingOut 重入保护，这里直接调用是安全的。
+                    EnsureGridHeight();
                     EnabledAppsChanged?.Invoke(new List<string>(_enabledApps.Keys));
                     break;
                 }
@@ -1211,8 +1758,8 @@ namespace TapRelay
         }
 
         /// <summary>
-        /// 鑷姩妫€娴嬪父瑙佸畨瑁呯洰褰曚笅鐨勭洰鏍囧簲鐢ㄣ€?
-        /// 妫€娴嬭寖鍥达細Claude/ChatGPT/TraeCode CN/TraeWork CN/ZCode/璞嗗寘銆?
+        /// 自动检测常见安装目录下的目标应用。
+        /// 检测范围：Claude/ChatGPT/TraeCode CN/TraeWork CN/ZCode/豆包。
         /// </summary>
         public async Task RunAutoDetectAsync()
         {
@@ -1237,9 +1784,9 @@ namespace TapRelay
         }
 
         /// <summary>
-        /// 鎵弿 C 鐩樺父瑙佸畨瑁呰矾寰勶紝杩斿洖妫€娴嬪埌鐨勫簲鐢ㄥ垪琛ㄣ€?
-        /// 璺緞涓?AgentCompletionMonitor.EnsureWatchersLocked 瀵归綈锛岀‘淇濊嚜鍔ㄦ娴嬪嚭鏉ョ殑搴旂敤
-        /// 涓庡疄闄呯洃鍚矾寰勪竴鑷淬€?
+        /// 扫描 C 盘常见安装路径，返回检测到的应用列表。
+        /// 路径与 AgentCompletionMonitor.EnsureWatchersLocked 对齐，确保自动检测出来的应用
+        /// 与实际监听路径一致。
         /// </summary>
         private static DetectionResult DetectInstalledApps()
         {
@@ -1294,12 +1841,18 @@ namespace TapRelay
             {
                 result.Apps.Add(new AppEntry("doubao", "\u8c46\u5305"));
             }
-            // WorkBuddy: installed Electron app or its per-user ACP log directory.
+            // WorkBuddy 与 WorkBuddy AI 使用独立 appKey。两套 ACP 日志格式相同，
+            // 但安装证据和用户数据目录必须分开，否则应用选择无法准确控制通知来源。
             var workBuddyRoot = Path.Combine(programFiles, "WorkBuddy");
-            if (File.Exists(Path.Combine(workBuddyRoot, "WorkBuddy.exe")) ||
-                Exists(Path.Combine(userProfile, ".workbuddy", "logs")))
+            var workBuddyAiRoot = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "WorkBuddyAI");
+            if (HasInstallEvidence("workbuddy"))
             {
                 result.Apps.Add(new AppEntry("workbuddy", "WorkBuddy", workBuddyRoot));
+            }
+            if (HasInstallEvidence("workbuddy-ai"))
+            {
+                result.Apps.Add(new AppEntry("workbuddy-ai", "WorkBuddy AI", workBuddyAiRoot));
             }
             // OpenCode: shared SQLite at ~/.local/share/opencode/opencode.db (desktop + CLI).
             if (OpenCodeDataLocator.FindDatabase(userProfile).Any())
@@ -1312,7 +1865,8 @@ namespace TapRelay
                 result.Apps.Add(new AppEntry("deepseekharness", "DeepSeek Harness"));
             }
             // Freebuff: packaged Electron app under %LOCALAPPDATA%\Programs\@codebufffreebuff-desktop
-            // (Codebuff 桌面版)，会话库位于 ~/.config/freebuff-desktop/projects/*/desktop-v2.db。
+            // (Codebuff 桌面版)。仅以桌面版 exe / 环境变量声明判定安装；
+            // ~/.config/freebuff-desktop 会话库是卸载残留，不作为安装证据。
             if (FreebuffDataLocator.IsInstalled())
             {
                 result.Apps.Add(new AppEntry("freebuff", "Freebuff"));
@@ -1366,7 +1920,7 @@ namespace TapRelay
         }
 
         /// <summary>
-        /// 鎵撳紑鏂囦欢澶归€夋嫨瀵硅瘽妗嗭紝鐢ㄦ埛閫夋嫨搴旂敤瀹夎鐩綍鍚庡姞鍏ュ凡鍚敤鍒楄〃銆?
+        /// 打开文件夹选择对话框，用户选择应用安装目录后加入已启用列表。
         /// </summary>
         /// <summary>
         /// Trae CN / TraeWork CN 是否已安装。%APPDATA%\...\logs 在卸载后仍会残留，
@@ -1602,7 +2156,7 @@ namespace TapRelay
         {
             using (var dialog = new FolderBrowserDialog
             {
-                Description = "閫夋嫨搴旂敤瀹夎鐩綍锛堝 Claude銆丆odex銆乀rae 绛夛級",
+                Description = "选择应用安装目录（如 Claude、Codex、Trae 等）",
                 ShowNewFolderButton = false
             })
             {
@@ -1652,6 +2206,7 @@ namespace TapRelay
             if (HasFile("TRAE SOLO CN.exe", "TraeWork CN.exe") || HasDirectory("TRAE SOLO CN\\logs", "TraeWork CN\\logs")) return "traework";
             if (HasFile("zcode.exe") || HasDirectory(".zcode\\cli\\log", ".zcode\\v2\\logs")) return "zcode";
             if (HasFile("Doubao.exe") || HasDirectory("User Data\\sdk_storage\\log")) return "doubao";
+            if (HasFile("WorkBuddyAI.exe") || HasDirectory(".workbuddy-ai\\logs")) return "workbuddy-ai";
             if (HasFile("WorkBuddy.exe") || HasDirectory("resources\\app.asar.unpacked\\cli", ".workbuddy\\logs")) return "workbuddy";
             if (HasFile("OpenCode.exe") || HasDirectory("resources\\app.asar", ".local\\share\\opencode")) return "opencode";
             if (HasFile("DeepSeek Harness Desktop.exe", "DeepSeek Harness.exe") ||
@@ -1676,6 +2231,7 @@ namespace TapRelay
             if (lower.Contains("baidunetdisk") || lower.Contains("\u767e\u5ea6\u7f51\u76d8")) return "baidunetdisk";
             if (lower.Contains("quark") || lower.Contains("\u5938\u514b")) return "quarknetdisk";
             if (lower.Contains("adrive") || lower.Contains("aliyun") || lower.Contains("\u963f\u91cc\u4e91\u76d8")) return "adrive";
+            if (lower.Contains("workbuddyai") || lower.Contains("workbuddy-ai")) return "workbuddy-ai";
             if (lower.Contains("workbuddy")) return "workbuddy";
             if (lower.Contains("opencode")) return "opencode";
             if (lower.Contains("deepseek") || lower.Contains("harness")) return "deepseekharness";
@@ -1710,6 +2266,7 @@ namespace TapRelay
                 case "quarknetdisk": return "\u5938\u514b\u7f51\u76d8";
                 case "adrive": return "\u963f\u91cc\u4e91\u76d8";
                 case "workbuddy": return "WorkBuddy";
+                case "workbuddy-ai": return "WorkBuddy AI";
                 case "opencode": return "OpenCode";
                 case "deepseekharness": return "DeepSeek Harness";
                 case "freebuff": return "Freebuff";
@@ -1792,7 +2349,7 @@ namespace TapRelay
         }
 
         /// <summary>
-        /// 搴旂敤鏉＄洰鏁版嵁銆?
+        /// 应用条目数据。
         /// </summary>
         public sealed class AppEntry
         {
@@ -1808,8 +2365,8 @@ namespace TapRelay
         }
 
         /// <summary>
-        /// 鍗曚釜搴旂敤鍥炬爣 + 鍚嶇О鐨勭粍鍚堟帶浠躲€傜偣鍑诲垏鎹㈠惎鐢?绂佺敤鐘舵€併€?
-        /// 绂佺敤鏃跺浘鏍囧彉鐏帮紝鍚敤鏃跺僵鑹层€?
+        /// 单个应用图标 + 名称的组合控件。点击切换启用/禁用状态。
+        /// 禁用时图标变灰，启用时彩色。
         /// </summary>
         private enum AppChipMode
         {
@@ -1827,7 +2384,10 @@ namespace TapRelay
             private Color _textPrimary;
             private Color _textSecondary;
             private Color _border;
-            private readonly Size _iconSize = new Size(26, 26);
+            private Color _accent = Color.FromArgb(111, 134, 126);
+            // 图标保持足够辨识度，同时给应用名与分区留出更紧凑的节奏。
+            private readonly Size _iconSize = new Size(38, 38);
+            private bool _hover;
             private readonly Image? _icon;
 
             public AppChip(AppEntry app)
@@ -1846,6 +2406,10 @@ namespace TapRelay
                 AccessibleRole = AccessibleRole.PushButton;
                 AccessibleName = app.DisplayName;
                 _icon = LoadIcon(app.Key);
+                // 方案 B：hover 时给图标块加强调色描边 + 右上角状态角标，
+                // 让「这一块可点」与「当前处于什么状态」不再只靠鼠标指针形状表达。
+                MouseEnter += (_, __) => { _hover = true; Invalidate(); };
+                MouseLeave += (_, __) => { _hover = false; Invalidate(); };
             }
 
             protected override void Dispose(bool disposing)
@@ -1857,12 +2421,13 @@ namespace TapRelay
                 base.Dispose(disposing);
             }
 
-            public void ApplyTheme(Color surface, Color textPrimary, Color textSecondary, Color border)
+            public void ApplyTheme(Color surface, Color textPrimary, Color textSecondary, Color border, Color accent)
             {
                 _surface = surface;
                 _textPrimary = textPrimary;
                 _textSecondary = textSecondary;
                 _border = border;
+                _accent = accent;
                 Invalidate();
             }
 
@@ -1887,11 +2452,11 @@ namespace TapRelay
                 var isOn = !_notInstalled && Enabled;
                 g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
-                // 图标在紧凑芯片中居中，名称保留独立一行。
+                // 图标在芯片中居中，名称保留独立一行。
                 var iconRect = new Rectangle((Width - _iconSize.Width) / 2, 0, _iconSize.Width, _iconSize.Height);
 
-                // 鍦嗚鑳屾櫙
-                var radius = 10;
+                // 圆角背景。40px 的块用 11px 圆角，视觉比例与原 26px/10px 基本一致。
+                var radius = UiTokens.ChipRadius;
                 var path = new GraphicsPath();
                 var d = Math.Max(1, Math.Min(radius * 2, Math.Min(Math.Max(1, iconRect.Width), Math.Max(1, iconRect.Height))));
                 path.AddArc(iconRect.X, iconRect.Y, d, d, 180, 90);
@@ -1901,19 +2466,24 @@ namespace TapRelay
                 path.CloseFigure();
 
                 var disabledSurface = _surface.R + _surface.G + _surface.B > 380
-                    ? Color.FromArgb(242, 245, 244)
-                    : Color.FromArgb(37, 54, 49);
+                    ? Color.FromArgb(241, 243, 245)
+                    : Color.FromArgb(34, 42, 50);
                 var disabledBorder = _surface.R + _surface.G + _surface.B > 380
-                    ? Color.FromArgb(211, 220, 216)
-                    : Color.FromArgb(63, 82, 74);
+                    ? Color.FromArgb(202, 211, 219)
+                    : Color.FromArgb(58, 70, 81);
+                // hover 时改用强调色描边并加粗，给出明确的「可点」反馈；
+                // 未 hover 时回到常规描边，避免所有芯片一起抢注意力。
+                var showHover = _hover && Enabled;
                 using (var bgBrush = new SolidBrush(isOn ? _surface : disabledSurface))
-                using (var borderPen = new Pen(isOn ? _border : disabledBorder, 1))
+                using (var borderPen = new Pen(
+                    showHover ? _accent : (isOn ? _border : disabledBorder),
+                    showHover ? 1.6f : 1f))
                 {
                     g.FillPath(bgBrush, path);
                     g.DrawPath(borderPen, path);
                 }
 
-                // 搴旂敤棣栧瓧姣嶄綔涓哄浘鏍囷紙鏃犵綉缁滃浘鏍囨椂鐨勫彲闈犲厹搴曪紝閬垮厤渚濊禆澶栭儴璧勬簮锛?
+                // 应用首字母作为图标（无网络图标时的可靠兜底，避免依赖外部资源）
                 if (_icon != null)
                 {
                     using var imageAttributes = new System.Drawing.Imaging.ImageAttributes();
@@ -1927,13 +2497,18 @@ namespace TapRelay
                             Matrix33 = 1f
                         });
                     }
+                    using var iconClip = new GraphicsPath();
+                    iconClip.AddEllipse(iconRect);
+                    var previousClip = g.Clip;
+                    g.SetClip(iconClip, CombineMode.Intersect);
                     g.DrawImage(_icon, iconRect, 0, 0, _icon.Width, _icon.Height, GraphicsUnit.Pixel, imageAttributes);
+                    g.Clip = previousClip;
                 }
                 else
                 {
                     var letter = string.IsNullOrEmpty(App.DisplayName) ? "?" : App.DisplayName.Substring(0, 1).ToUpperInvariant();
                     var letterColor = isOn ? GetAppColor(App.Key) : Color.FromArgb(160, 160, 160);
-                    using (var font = new Font("Microsoft YaHei UI", 14F, FontStyle.Bold))
+                    using (var font = new Font(UiTokens.UiFontFamily, 14F, FontStyle.Bold))
                     using (var letterBrush = new SolidBrush(letterColor))
                     {
                         var sf = new StringFormat
@@ -1945,8 +2520,41 @@ namespace TapRelay
                     }
                 }
 
-                // 鍚嶇О
-                using (var nameFont = new Font("Microsoft YaHei UI", AppNameFontSize))
+                // 已启用状态常态显示对勾，禁用/未安装仍保持灰度；hover 时再显示
+                // 可执行的加号，避免用户只能靠颜色猜测当前是否会推送通知。
+                if (isOn || showHover)
+                {
+                    var badge = isOn ? 12 : 15;
+                    var badgeRect = new Rectangle(iconRect.Right - badge + 3, iconRect.Y - 2, badge, badge);
+                    using (var badgeBrush = new SolidBrush(isOn ? _accent : _textSecondary))
+                    {
+                        g.FillEllipse(badgeBrush, badgeRect);
+                    }
+                    using (var markPen = new Pen(Color.White, isOn ? 1.5f : 1.8f))
+                    {
+                        markPen.StartCap = LineCap.Round;
+                        markPen.EndCap = LineCap.Round;
+                        var cx = badgeRect.X + badge / 2f;
+                        var cy = badgeRect.Y + badge / 2f;
+                        if (isOn)
+                        {
+                            g.DrawLines(markPen, new[]
+                            {
+                                new PointF(cx - 3.4f, cy + 0.2f),
+                                new PointF(cx - 1.0f, cy + 2.6f),
+                                new PointF(cx + 3.6f, cy - 2.6f)
+                            });
+                        }
+                        else
+                        {
+                            g.DrawLine(markPen, cx - 3.2f, cy, cx + 3.2f, cy);
+                            g.DrawLine(markPen, cx, cy - 3.2f, cx, cy + 3.2f);
+                        }
+                    }
+                }
+
+                // 名称
+                using (var nameFont = new Font(UiTokens.UiFontFamily, AppNameFontSize))
                 using (var nameBrush = new SolidBrush(isOn ? _textPrimary : _textSecondary))
                 {
                     var nameRect = new Rectangle(
@@ -1967,7 +2575,7 @@ namespace TapRelay
             }
 
             /// <summary>
-            /// 鍚勫簲鐢ㄥ搧鐗岃壊锛屼笌 APP 绔?Channel 鏋氫妇棰滆壊瀵归綈銆?
+            /// 各应用品牌色，与 APP 端 Channel 枚举颜色对齐。
             /// </summary>
             private static Image? LoadIcon(string appKey)
             {
@@ -2001,6 +2609,7 @@ namespace TapRelay
                     "quarknetdisk" => "ic_quarknetdisk_logo.png",
                     "adrive" => "ic_adrive_logo.png",
                     "workbuddy" => "ic_workbuddy_logo.png",
+                    "workbuddy-ai" => "ic_workbuddy_ai_logo.png",
                     "comfyui" => "ic_comfyui_logo.png",
                     "opencode" => "ic_opencode_logo.png",
                     "deepseekharness" => "ic_deepseekharness_logo.png",
@@ -2055,23 +2664,24 @@ namespace TapRelay
 
                 switch (key.ToLowerInvariant())
                 {
-                    case "claude": return Color.FromArgb(217, 119, 87);    // 姗?
+                    case "claude": return Color.FromArgb(217, 119, 87);    // 橙
                     case "claude-haha": return Color.FromArgb(217, 119, 87);  // Claude Code Haha 改版，与官方 Claude Code 同源品牌色
-                    case "codex": return Color.FromArgb(16, 185, 129);     // 缁?
-                    case "trae": return Color.FromArgb(59, 130, 246);      // 钃?
-                    case "traework": return Color.FromArgb(245, 158, 11); // 榛?
-                    case "zcode": return Color.FromArgb(236, 72, 153);     // 绮?
-                    case "doubao": return Color.FromArgb(245, 101, 72);    // 璞嗗寘姗欑孩
+                    case "codex": return Color.FromArgb(16, 185, 129);     // 绿
+                    case "trae": return Color.FromArgb(59, 130, 246);      // 蓝
+                    case "traework": return Color.FromArgb(245, 158, 11); // 黄
+                    case "zcode": return Color.FromArgb(236, 72, 153);     // 粉
+                    case "doubao": return Color.FromArgb(245, 101, 72);    // 豆包橙红
                     case "baidunetdisk": return Color.FromArgb(54, 119, 246); // Baidu blue
                     case "quarknetdisk": return Color.FromArgb(78, 110, 242); // Quark blue-purple
                     case "adrive": return Color.FromArgb(255, 143, 45); // Aliyun Drive orange
-                    case "workbuddy": return Color.FromArgb(99, 81, 241); // WorkBuddy violet
+                    case "workbuddy": return Color.FromArgb(0, 188, 144); // WorkBuddy green (#00BC90)
+                    case "workbuddy-ai": return Color.FromArgb(16, 198, 166); // WorkBuddy AI green
                     case "comfyui": return Color.FromArgb(242, 255, 89);   // ComfyUI official neon yellow
                     case "opencode": return Color.FromArgb(244, 244, 245);  // OpenCode off-white/gray brand
                     case "deepseekharness": return Color.FromArgb(77, 107, 254);  // DeepSeek brand blue (#4D6BFE)
                     case "freebuff": return Color.FromArgb(0, 0, 0);       // Freebuff 官方品牌黑（logo 为黑底白星）
                     case "leigod": return Color.FromArgb(255, 122, 0);     // LeiGod orange (#FF7A00)
-                    default: return Color.FromArgb(148, 163, 184);          // 涓伆涓伆
+                    default: return Color.FromArgb(148, 163, 184);          // 中灰
                 }
             }
         }

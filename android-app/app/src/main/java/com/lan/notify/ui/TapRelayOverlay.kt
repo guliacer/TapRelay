@@ -61,7 +61,6 @@ fun TapRelayOverlay(
     onDismissAll: () -> Unit,
     onResolveApproval: ((NotifyMessage, String) -> Unit)? = null,
     onProcessWaiting: ((NotifyMessage) -> Unit)? = null,
-    onContinue: ((NotifyMessage) -> Unit)? = null,
     debugEnabled: Boolean = false,
     dynamicEffectsEnabled: Boolean = true,
     screenGeometry: ScreenGeometry? = null
@@ -357,7 +356,6 @@ fun TapRelayOverlay(
                         onDismissAll = onDismissAll,
                         onResolveApproval = onResolveApproval,
                         onProcessWaiting = onProcessWaiting,
-                        onContinue = onContinue,
                         playEntrance = false,
                         dynamicEffectsEnabled = dynamicEffectsEnabled
                     )

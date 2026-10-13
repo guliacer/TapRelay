@@ -72,18 +72,6 @@ class NotificationDismissReceiver : BroadcastReceiver() {
                 return
             }
 
-            ACTION_AGENT_CONTINUE -> {
-                val messageId = intent.getStringExtra(EXTRA_MESSAGE_ID) ?: return
-                // 通知卡上的「继续」需要输入指令，拉起 MainActivity 弹出输入框。
-                val continueIntent = Intent(context, com.lan.notify.MainActivity::class.java)
-                    .setAction(Intent.ACTION_MAIN)
-                    .addCategory(Intent.CATEGORY_LAUNCHER)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                    .putExtra(com.lan.notify.MainActivity.EXTRA_CONTINUE_MESSAGE_ID, messageId)
-                context.startActivity(continueIntent)
-                return
-            }
-
             else -> return
         }
 
@@ -101,7 +89,6 @@ class NotificationDismissReceiver : BroadcastReceiver() {
         const val ACTION_APPROVAL_ALLOW = "com.lan.notify.notification.ACTION_APPROVAL_ALLOW"
         const val ACTION_APPROVAL_DENY = "com.lan.notify.notification.ACTION_APPROVAL_DENY"
         const val ACTION_AGENT_STOP = "com.lan.notify.notification.ACTION_AGENT_STOP"
-        const val ACTION_AGENT_CONTINUE = "com.lan.notify.notification.ACTION_AGENT_CONTINUE"
         const val EXTRA_MESSAGE_ID = "extra_message_id"
         const val EXTRA_APPROVAL_REQUEST_ID = "extra_approval_request_id"
     }

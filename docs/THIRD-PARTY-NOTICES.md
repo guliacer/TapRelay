@@ -78,9 +78,11 @@ PC 和 Android 的“个人项目”入口会展示并打开以下 GitHub 项目
 - [PixGo](https://github.com/guliacer/PixGo)
 - [news-html-digest](https://github.com/guliacer/news-html-digest)
 
-其中，PC 端源码明确将 PixGo 作为个人项目入口的线性图标风格参考；这属于视觉风格参考，
-没有引入 PixGo 的源文件或运行时依赖。PC 和 Android 还内嵌了一个用于项目入口的简化
-GitHub Mark 路径；它只用于链接按钮，不属于 GitHub SDK。品牌标识使用应遵守
+PC 和 Android 内嵌了同一份项目入口线性图标路径：GitHub Mark、外部打开和 Globe
+（复制）图标。PC 端的 `PersonalProjectsForm` 与 Android 的
+`PersonalProjectsDialog` 使用逐字符一致的 pathData，由 PC 端内置的精简 SVG
+路径解析器转成 `GraphicsPath` 绘制；这些图标只用于个人项目卡片，不属于 GitHub SDK。
+没有引入 PixGo 的源文件或运行时依赖。GitHub 品牌标识使用应遵守
 [GitHub Logos and Usage](https://github.com/logos) 的要求。
 
 ## 扫描范围说明

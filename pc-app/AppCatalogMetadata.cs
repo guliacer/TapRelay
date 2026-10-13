@@ -28,6 +28,7 @@ namespace TapRelay
             "quarknetdisk",
             "adrive",
             "workbuddy",
+            "workbuddy-ai",
             "comfyui",
             "opencode",
             "deepseekharness",
@@ -51,6 +52,7 @@ namespace TapRelay
                     return "完成/失败/等待确认时通知";
                 case "doubao":
                 case "workbuddy":
+                case "workbuddy-ai":
                 case "opencode":
                 case "deepseekharness":
                     return "完成/失败时通知";

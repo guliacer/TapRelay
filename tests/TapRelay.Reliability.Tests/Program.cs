@@ -15,6 +15,16 @@ internal static partial class Program
     private static async Task<int> Main(string[] args)
     {
         if (args.Length == 2 && args[0] == "--child") return await RunChild(args[1]);
+        // 无头布局快照：只渲染 MainForm 到 PNG，不跑测试（见 UiSnapshot.cs）。
+        if (args.Length >= 2 && args[0] == "--ui-snapshot")
+        {
+            return UiSnapshot.Run(args[1], args.Length >= 3 ? args[2] : null);
+        }
+        // 托盘退出路径探针：在进程内真正调用 ExitFromTrayAsync（见 ExitProbe.cs）。
+        if (args.Length >= 1 && args[0] == "--exit-probe")
+        {
+            return ExitProbe.Run();
+        }
 
         await Test("CLI drains large stdout and stderr before exit", async () =>
         {

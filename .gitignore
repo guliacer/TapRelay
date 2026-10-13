@@ -33,6 +33,14 @@ tests/doubao-test2-appended.bin
 android-app/build-window.xml
 android-app/qa-current.png
 
+# One-off validation snapshots and local scratch material; conclusions live in 09 docs.
+artifacts/
+.workbuddy-ai/
+.tmp/
+docs/ui-review-*/
+docs/*-review-*/
+docs/*-shots-*/
+
 # Local credentials and Android signing material.
 .env
 .env.*

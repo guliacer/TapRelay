@@ -28,6 +28,19 @@ class LocalStore(context: Context) {
         prefs.edit().putString(KEY_DEVICE_NAME, name).apply()
     }
 
+    /**
+     * 历史连接地址（最近使用在前，最多 [MAX_HOST_HISTORY] 条）。
+     * 读取时统一做一次去重 + 倒序 + 截断，即使本地 JSON 被外部改坏也能拿到合法结果。
+     */
+    fun loadHostHistory(): List<HostHistoryEntry> {
+        val raw = prefs.getString(KEY_HOST_HISTORY, "[]") ?: "[]"
+        return decodeHostHistory(raw)
+    }
+
+    fun saveHostHistory(entries: List<HostHistoryEntry>) {
+        prefs.edit().putString(KEY_HOST_HISTORY, encodeHostHistory(entries)).apply()
+    }
+
     fun loadMessages(): List<NotifyMessage> {
         val raw = prefs.getString(KEY_MESSAGES, "[]") ?: "[]"
         return decodeMessages(raw)
@@ -115,6 +128,7 @@ class LocalStore(context: Context) {
     companion object {
         private const val PREFS_NAME = "notify_local_store"
         private const val KEY_SERVER_HOST = "server_host"
+        private const val KEY_HOST_HISTORY = "host_history"
         private const val KEY_DEVICE_NAME = "device_name"
         private const val KEY_MESSAGES = "messages"
         private const val KEY_THEME_MODE = "theme_mode"
@@ -127,6 +141,50 @@ class LocalStore(context: Context) {
         private const val KEY_ONBOARDING_DONE = "onboarding_done"
         const val DEFAULT_DYNAMIC_EFFECTS = true
         const val DEFAULT_DEVICE_NAME = "PC设备"
+
+        /**
+         * 解析历史地址 JSON。坏数据一律降级为空列表而不是崩溃。
+         *
+         * 读取路径也做一次归一化（倒序 → 按去重键去重 → 截断），
+         * 这样手改过、或由旧版本写坏的文件不会把重复/超限记录带到 UI。
+         * 注意顺序：必须先排序再去重，`distinctBy` 保留首个命中的元素，
+         * 排好序后保留的才是同一去重键里最新的那条。
+         */
+        internal fun decodeHostHistory(raw: String): List<HostHistoryEntry> {
+            return runCatching {
+                val array = JSONArray(raw)
+                val decoded = buildList {
+                    for (index in 0 until array.length()) {
+                        val item = array.optJSONObject(index) ?: continue
+                        val host = item.optString("host").trim()
+                        if (host.isBlank()) continue
+                        add(
+                            HostHistoryEntry(
+                                host = host,
+                                lastUsedAt = item.optLong("lastUsedAt", 0L).coerceAtLeast(0L)
+                            )
+                        )
+                    }
+                }
+                decoded
+                    .sortedByDescending { it.lastUsedAt }
+                    .distinctBy { hostHistoryKey(it.host) }
+                    .take(MAX_HOST_HISTORY)
+            }.getOrElse { emptyList() }
+        }
+
+        internal fun encodeHostHistory(entries: List<HostHistoryEntry>): String {
+            val array = JSONArray()
+            entries.forEach { entry ->
+                array.put(
+                    JSONObject().apply {
+                        put("host", entry.host)
+                        put("lastUsedAt", entry.lastUsedAt)
+                    }
+                )
+            }
+            return array.toString()
+        }
 
         internal fun decodeRegisteredApps(raw: String): Map<String, RegisteredApp> {
             return runCatching {
@@ -203,7 +261,6 @@ class LocalStore(context: Context) {
                                 requiresAction = item.optBoolean("requiresAction", false),
                                 expiresAtMs = item.optLong("expiresAtMs").coerceAtLeast(0L),
                                 approvalDecision = item.optString("approvalDecision"),
-                                sentInstruction = item.optString("sentInstruction"),
                                 isRead = if (item.has("isRead")) item.optBoolean("isRead") else true,
                                 id = item.optString("id").ifBlank {
                                     item.optString("eventId").takeIf { it.isNotBlank() }
@@ -247,7 +304,6 @@ class LocalStore(context: Context) {
                         put("requiresAction", message.requiresAction)
                         put("expiresAtMs", message.expiresAtMs)
                         put("approvalDecision", message.approvalDecision)
-                        put("sentInstruction", message.sentInstruction)
                         put("isRead", message.isRead)
                         put("id", message.id)
                     }

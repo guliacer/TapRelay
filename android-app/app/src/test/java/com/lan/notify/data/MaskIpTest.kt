@@ -1,9 +1,9 @@
-package com.lan.notify.ui
+package com.lan.notify.data
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** 覆盖"隐藏 IP"的脱敏函数：IPv4 与域名都必须脱敏，非地址文本原样返回。 */
+/** 覆盖「隐藏地址」的脱敏函数：IPv4 与域名都必须脱敏，非地址文本原样返回。 */
 class MaskIpTest {
 
     @Test
@@ -18,7 +18,7 @@ class MaskIpTest {
 
     @Test
     fun masksDomainKeepingPort() {
-        // 当前默认地址是隧道域名（隧道优先），必须能被脱敏，否则"隐藏 IP"点击无反应。
+        // 当前默认地址是隧道域名（隧道优先），必须能被脱敏，否则「隐藏地址」点击无反应。
         assertEquals("w**.g*******.d****.o**:443", maskIp("win.guliacer.dpdns.org:443"))
     }
 
@@ -38,9 +38,19 @@ class MaskIpTest {
     }
 
     @Test
+    fun singleCharacterSegmentsHaveNothingToHide() {
+        // 模拟器验证时用的地址：段长为 1 的段没有可隐藏的字符，原样保留。
+        // （旧 KDoc 里写的示例 `1**.1**.*.3*` 与实现不符，这里以实现为准。）
+        assertEquals("1*.0.2.2", maskIp("10.0.2.2"))
+        assertEquals("1*.0.2.2:1122", maskIp("10.0.2.2:1122"))
+    }
+
+    @Test
     fun leavesNonAddressTextUntouched() {
-        assertEquals("未找到可用地址，请填写网络设置中的对外地址。",
-            maskIp("未找到可用地址，请填写网络设置中的对外地址。"))
+        assertEquals(
+            "未找到可用地址，请填写网络设置中的对外地址。",
+            maskIp("未找到可用地址，请填写网络设置中的对外地址。")
+        )
         assertEquals("", maskIp(""))
         assertEquals("   ", maskIp("   "))
     }

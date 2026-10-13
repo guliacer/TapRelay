@@ -50,7 +50,6 @@ import com.lan.notify.data.MessageTimeFormatter
 import com.lan.notify.data.NotifyMessage
 import com.lan.notify.data.RegisteredApp
 import com.lan.notify.data.TaskState
-import com.lan.notify.data.canSendMessage
 import com.lan.notify.data.displayContent
 import com.lan.notify.data.hasApprovalAction
 import com.lan.notify.data.isWaitingTask
@@ -135,8 +134,7 @@ class FullScreenAlertActivity : ComponentActivity() {
                     onView = { handleView(message) },
                     onDismiss = { handleDismiss(message) },
                     onResolveApproval = { decision -> handleResolveApproval(message, decision) },
-                    onProcessWaiting = { handleView(message) },
-                    onContinue = { handleContinue(message) }
+                    onProcessWaiting = { handleView(message) }
                 )
             }
         }
@@ -162,21 +160,6 @@ class FullScreenAlertActivity : ComponentActivity() {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 putExtra(MainActivity.EXTRA_MESSAGE_ID, message.id)
                 putExtra(MainActivity.EXTRA_MESSAGE_ACTION_URL, message.actionUrl)
-            }
-        )
-        finish()
-    }
-
-    /** Open the main Activity and let its shared continue dialog collect input. */
-    private fun handleContinue(message: NotifyMessage) {
-        if (messageHandled) return
-        messageHandled = true
-        startActivity(
-            Intent(this, MainActivity::class.java).apply {
-                action = Intent.ACTION_MAIN
-                addCategory(Intent.CATEGORY_LAUNCHER)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                putExtra(MainActivity.EXTRA_CONTINUE_MESSAGE_ID, message.id)
             }
         )
         finish()
@@ -238,8 +221,7 @@ private fun FullScreenAlertContent(
     onView: () -> Unit,
     onDismiss: () -> Unit,
     onResolveApproval: (String) -> Unit,
-    onProcessWaiting: () -> Unit,
-    onContinue: () -> Unit
+    onProcessWaiting: () -> Unit
 ) {
     val state = TaskState.from(message.status)
     val accent = when (state) {
@@ -376,32 +358,6 @@ private fun FullScreenAlertContent(
                         PlainButton(
                             text = "处理",
                             onClick = onProcessWaiting,
-                            modifier = Modifier.weight(1f),
-                            variant = PlainButtonVariant.PRIMARY
-                        )
-                        if (message.canSendMessage()) {
-                            PlainButton(
-                                text = "继续",
-                                onClick = onContinue,
-                                modifier = Modifier.weight(1f),
-                                variant = PlainButtonVariant.PRIMARY
-                            )
-                        }
-                    }
-                } else if (message.canSendMessage()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        PlainButton(
-                            text = "关闭",
-                            onClick = onDismiss,
-                            modifier = Modifier.weight(1f),
-                            variant = PlainButtonVariant.SECONDARY
-                        )
-                        PlainButton(
-                            text = "继续",
-                            onClick = onContinue,
                             modifier = Modifier.weight(1f),
                             variant = PlainButtonVariant.PRIMARY
                         )

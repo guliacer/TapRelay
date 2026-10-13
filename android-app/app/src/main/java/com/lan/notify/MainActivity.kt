@@ -4,22 +4,12 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.app.AlertDialog
-import android.app.Dialog
-import android.content.res.ColorStateList
 import android.graphics.Color
-import android.graphics.drawable.ColorDrawable
-import android.graphics.drawable.GradientDrawable
 import android.net.Uri
-import android.text.InputType
-import android.widget.EditText
-import android.widget.LinearLayout
-import android.widget.TextView
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
-import android.view.Gravity
-import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -37,9 +27,7 @@ import com.lan.notify.data.ConnectionQrCodec
 import com.lan.notify.data.MessageRepository
 import com.lan.notify.data.NotifyMessage
 import com.lan.notify.data.RelayConfig
-import com.lan.notify.data.projectTitle
 import com.lan.notify.data.safeActionUri
-import com.lan.notify.data.taskUsageLabel
 import com.lan.notify.notification.NotificationHelper
 import com.lan.notify.service.WebSocketService
 import com.lan.notify.ui.MainScreen
@@ -96,13 +84,14 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handleMessageIntent(intent)
-        handleContinueIntent(intent)
         setContent {
             val themeMode by MessageRepository.themeMode.collectAsState()
             val listMode by MessageRepository.listMode.collectAsState()
             val projectExpandCounts by MessageRepository.projectExpandCounts.collectAsState()
             val dynamicEffectsEnabled by MessageRepository.dynamicEffectsEnabled.collectAsState()
             val deviceName by MessageRepository.deviceName.collectAsState()
+            val hostHistory by MessageRepository.hostHistory.collectAsState()
+            val hostMasked by MessageRepository.hostMasked.collectAsState()
             // 首次启动自动进入权限向导（onboarding 模式），用户完成/跳过后才进主界面。
             var showPermissionCheck by remember { mutableStateOf(!MessageRepository.isOnboardingDone) }
             NotifyTheme(themeMode = themeMode) {
@@ -138,13 +127,16 @@ class MainActivity : ComponentActivity() {
                         onOpenPermissionCheck = { showPermissionCheck = true },
                         onMarkMessageRead = ::markMessageRead,
                         onMarkAllMessagesRead = ::markAllMessagesRead,
-                        onSendToAgent = ::sendToAgent,
                         onResolveApproval = ::resolveApprovalFromMessage,
                         onProcessWaiting = ::processWaitingMessage,
                         dynamicEffectsEnabled = dynamicEffectsEnabled,
                         onDynamicEffectsChange = MessageRepository::setDynamicEffectsEnabled,
                         deviceName = deviceName,
                         onDeviceNameChange = MessageRepository::setDeviceName,
+                        hostHistory = hostHistory,
+                        hostMasked = hostMasked,
+                        onHostMaskedChange = MessageRepository::setHostMasked,
+                        onClearHostHistory = MessageRepository::clearHostHistory,
                         onClearHistory = {
                             NotificationHelper.clearTaskNotifications(
                                 this,
@@ -152,7 +144,6 @@ class MainActivity : ComponentActivity() {
                             )
                             MessageRepository.clearMessages()
                         },
-                        onContinueDialogVisibilityChanged = ::setOverlaySuppressedForModal
                     )
                 }
             }
@@ -183,7 +174,6 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleMessageIntent(intent)
-        handleContinueIntent(intent)
     }
 
     private fun handleMessageIntent(intent: Intent?) {
@@ -212,18 +202,6 @@ class MainActivity : ComponentActivity() {
         syncTaskNotifications()
     }
 
-    /** 在手机上给 agent 会话发送下一条指令（继续 vibe coding）。 */
-    private fun sendToAgent(message: NotifyMessage, text: String) {
-        if (!MessageRepository.hasKnownGoodHost) {
-            Toast.makeText(this, "请先连接 PC 后再操作", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val accepted = WebSocketService.requestAgentSend(this, message, text)
-        if (accepted) {
-            Toast.makeText(this, "已发送指令", Toast.LENGTH_SHORT).show()
-        }
-    }
-
     /** 在手机上直接处理等待确认（WorkBuddy 权限/批量删除确认等）。 */
     private fun resolveApprovalFromMessage(message: NotifyMessage, decision: String) {
         if (message.requestId.isBlank()) return
@@ -245,124 +223,6 @@ class MainActivity : ComponentActivity() {
             runCatching { startActivity(Intent(Intent.ACTION_VIEW, uri)) }
         } ?: Toast.makeText(this, "请在电脑端处理此任务", Toast.LENGTH_LONG).show()
         markMessageRead(message.id)
-    }
-
-    /**
-     * 通知卡上的「继续」按钮：拉起本 Activity 后弹输入框，
-     * 发送时复用与主界面历史一致的 [sendToAgent] 链路。
-     */
-    private fun handleContinueIntent(intent: Intent?) {
-        val messageId = intent?.getStringExtra(EXTRA_CONTINUE_MESSAGE_ID) ?: return
-        intent.removeExtra(EXTRA_CONTINUE_MESSAGE_ID)
-        val message = MessageRepository.state.value.messages
-            .firstOrNull { it.id == messageId } ?: return
-        showContinueDialog(message)
-    }
-
-    private fun showContinueDialog(message: NotifyMessage) {
-        setOverlaySuppressedForModal(true)
-        val density = resources.displayMetrics.density
-        fun dp(value: Int): Int = (value * density + 0.5f).toInt()
-        fun textView(text: String, sizeSp: Float, color: Int): TextView = TextView(this).apply {
-            this.text = text
-            textSize = sizeSp
-            setTextColor(color)
-        }
-        fun actionButton(text: String, primary: Boolean): TextView = textView(
-            text,
-            14f,
-            if (primary) Color.WHITE else Color.rgb(83, 105, 98)
-        ).apply {
-            gravity = Gravity.CENTER
-            minHeight = dp(42)
-            setPadding(dp(18), 0, dp(18), 0)
-            background = GradientDrawable().apply {
-                cornerRadius = dp(10).toFloat()
-                setColor(if (primary) Color.rgb(111, 134, 126) else Color.TRANSPARENT)
-                if (!primary) setStroke(dp(1), Color.rgb(111, 134, 126))
-            }
-        }
-
-        val panel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(18), dp(20), dp(18))
-            background = GradientDrawable().apply {
-                cornerRadius = dp(16).toFloat()
-                setColor(Color.WHITE)
-            }
-        }
-        panel.addView(
-            textView("继续会话", 20f, Color.rgb(15, 23, 42)),
-            LinearLayout.LayoutParams(-1, -2)
-        )
-        panel.addView(
-            textView(message.projectTitle("此会话"), 14f, Color.rgb(71, 85, 105)).apply {
-                maxLines = 1
-                ellipsize = android.text.TextUtils.TruncateAt.END
-            },
-            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) }
-        )
-        panel.addView(
-            textView(message.taskUsageLabel(), 11f, Color.rgb(100, 116, 139)),
-            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) }
-        )
-
-        val input = EditText(this).apply {
-            hint = "输入给 agent 的下一条指令"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
-            gravity = Gravity.TOP or Gravity.START
-            minLines = 3
-            maxLines = 10
-            setHorizontallyScrolling(false)
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            backgroundTintList = ColorStateList.valueOf(Color.rgb(183, 200, 192))
-        }
-        panel.addView(
-            input,
-            LinearLayout.LayoutParams(-1, dp(116)).apply { topMargin = dp(12) }
-        )
-
-        var dialog: Dialog? = null
-        val actions = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.END
-        }
-        val cancel = actionButton("取消", primary = false).apply {
-            setOnClickListener { dialog?.dismiss() }
-        }
-        val send = actionButton("发送", primary = true).apply {
-            setOnClickListener {
-                input.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { value ->
-                    sendToAgent(message, value)
-                    dialog?.dismiss()
-                }
-            }
-        }
-        actions.addView(cancel, LinearLayout.LayoutParams(0, dp(42)).apply { weight = 1f })
-        actions.addView(send, LinearLayout.LayoutParams(0, dp(42)).apply {
-            weight = 1f
-            leftMargin = dp(8)
-        })
-        panel.addView(actions, LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(14) })
-
-        dialog = Dialog(this).apply {
-            setContentView(panel)
-            setCanceledOnTouchOutside(true)
-            setOnDismissListener { setOverlaySuppressedForModal(false) }
-            setOnShowListener {
-                window?.apply {
-                    setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-                    setLayout(dp(360), WindowManager.LayoutParams.WRAP_CONTENT)
-                    setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-                }
-            }
-        }
-        dialog?.show()
-        dialog?.window?.apply {
-                setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-                setLayout(dp(360), WindowManager.LayoutParams.WRAP_CONTENT)
-                setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-        }
     }
 
     /** Keep application dialogs above the app-owned TYPE_APPLICATION_OVERLAY cards. */
@@ -532,6 +392,5 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_MESSAGE_ID = "extra_message_id"
         const val EXTRA_MESSAGE_ACTION_URL = "extra_message_action_url"
-        const val EXTRA_CONTINUE_MESSAGE_ID = "extra_continue_message_id"
     }
 }

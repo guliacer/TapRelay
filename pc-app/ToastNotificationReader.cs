@@ -64,7 +64,8 @@ namespace TapRelay
                 // （ToastText02：text id=1 标题「任务已完成」、id=2 正文「「<任务名>」 已成功完成…」）。
                 // 本映射是 WorkBuddy 通知的兜底源：主源为 workbuddy.db sessions 表
                 // （WorkBuddySessionReader），仅当会话库不可得时才回退到本 toast。
-                { "workbuddy", new[] { "WorkBuddy.WorkBuddy" } }
+                { "workbuddy", new[] { "WorkBuddy.WorkBuddy" } },
+                { "workbuddy-ai", new[] { "WorkBuddy.WorkBuddy", "WorkBuddyAI.WorkBuddyAI" } }
             };
 
         internal static bool TryReadLatest(

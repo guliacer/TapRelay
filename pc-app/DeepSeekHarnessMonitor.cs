@@ -44,6 +44,7 @@ namespace TapRelay
 
         private readonly Action<DeepSeekHarnessCompletion> _completed;
         private readonly Action<string> _log;
+        private readonly Action<string> _detailLog;
         private readonly Func<bool> _isProcessRunning;
         private readonly object _gate = new object();
         private readonly Dictionary<string, SessionState> _states = new Dictionary<string, SessionState>(StringComparer.OrdinalIgnoreCase);
@@ -55,10 +56,13 @@ namespace TapRelay
         internal DeepSeekHarnessMonitor(
             Action<DeepSeekHarnessCompletion> completed,
             Action<string> log,
-            Func<bool>? isProcessRunning = null)
+            Func<bool>? isProcessRunning = null,
+            Action<string>? detailLog = null)
         {
             _completed = completed ?? throw new ArgumentNullException(nameof(completed));
             _log = log ?? throw new ArgumentNullException(nameof(log));
+            // 每轮轮询的会话计数（roots= / files=）是内部节拍，只写诊断文件。
+            _detailLog = detailLog ?? log;
             _isProcessRunning = isProcessRunning ?? (() => AdaptedProcessGate.IsRunningForAppKey("deepseekharness"));
         }
 
@@ -109,7 +113,7 @@ namespace TapRelay
             {
                 active += AddRoot(root);
             }
-            _log("DeepSeek Harness 会话监控刷新：roots=" + roots.Length + " files=" + active);
+            _detailLog("DeepSeek Harness 会话监控刷新：roots=" + roots.Length + " files=" + active);
         }
 
         private void PollMonitor()

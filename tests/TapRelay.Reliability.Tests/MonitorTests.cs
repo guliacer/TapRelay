@@ -109,6 +109,40 @@ internal static partial class Program
                 messages[0].GetProperty("sessionId").GetString() == "probe-session", "Waiting metadata was lost");
             return Task.CompletedTask;
         });
+        await Test("WorkBuddy stop hooks are not task completions", () =>
+        {
+            const string workBuddyPath =
+                @"C:\Users\Admin\.workbuddy\logs\2026-09-27\世界杯球赛分析项目__fixture.log";
+            const string sessionId = "workbuddy-compaction-session";
+            using var server = CreateServer();
+            var messages = CaptureMessages(server);
+            using var monitor = new AgentCompletionMonitor(server, _ => { }, _ => true);
+
+            Feed(monitor, workBuddyPath,
+                "[SessionManager] entry opts: sessionId=" + sessionId + " serve=true");
+            Feed(monitor, workBuddyPath,
+                "[SessionManager][Gate] willRetry=true reason=compacting session=" + sessionId);
+            Feed(monitor, workBuddyPath,
+                "[SessionHookManager] executeStopHooks sessionId=" + sessionId +
+                " stopHookActive=false stopReason=completed");
+            Require(messages.Count == 0, "Non-authoritative stop hook was published as completion");
+
+            Feed(monitor, workBuddyPath,
+                "[SessionRunStateMachine] transition | sessionId=" + sessionId +
+                " | event=COMPACT_ENDED | from=compacting | to=idle");
+            Feed(monitor, workBuddyPath,
+                "[SessionHookManager] executeStopHooks sessionId=" + sessionId +
+                " stopHookActive=false stopReason=completed");
+            Require(messages.Count == 0, "Stop hook was published after compaction ended");
+            Feed(monitor, workBuddyPath,
+                "[AcpView] Prompt completed for session " + sessionId +
+                ", stopReason: end_turn, finishReason: stop");
+            Require(messages.Count == 1 &&
+                    messages[0].GetProperty("status").GetString() == "completed" &&
+                    messages[0].GetProperty("sessionId").GetString() == sessionId,
+                "Real completion after compaction was lost");
+            return Task.CompletedTask;
+        });
     }
 
     private static List<JsonElement> CaptureMessages(NotifyServer server)

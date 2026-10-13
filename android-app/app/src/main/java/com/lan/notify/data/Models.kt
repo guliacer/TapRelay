@@ -47,11 +47,6 @@ data class NotifyMessage(
     val expiresAtMs: Long = 0L,
     /** allow / deny；未处理时为空。 */
     val approvalDecision: String = "",
-    /**
-     * 手机端「继续」按钮发给 agent 的指令原文。持久化到历史，供 agent.result
-     * 回执回显与重启后追溯，不再依赖 WebSocketService 的内存缓存。
-     */
-    val sentInstruction: String = "",
     val isRead: Boolean = false,
     val id: String = eventId
         .takeIf { it.isNotBlank() }
@@ -259,7 +254,7 @@ fun normalizeAppKey(source: String): String = source.trim().lowercase()
 
 private val BUILT_IN_APP_KEYS = setOf(
     "claude", "claude-haha", "codex", "trae", "trae-solo", "traework", "zcode", "doubao", "qwen",
-    "suyan", "baidunetdisk", "quarknetdisk", "quarknetdisk-upload", "adrive", "adrive-upload", "workbuddy", "comfyui", "taprelay"
+    "suyan", "baidunetdisk", "quarknetdisk", "quarknetdisk-upload", "adrive", "adrive-upload", "workbuddy", "workbuddy-ai", "comfyui", "taprelay"
 )
 
 fun isBuiltInAppKey(source: String): Boolean = normalizeAppKey(source) in BUILT_IN_APP_KEYS
@@ -274,27 +269,6 @@ fun isBuiltInAppKey(source: String): Boolean = normalizeAppKey(source) in BUILT_
 private val STOPPABLE_AGENT_SOURCES = setOf(
     "claude", "claude-haha", "codex", "opencode", "deepseekharness", "freebuff"
 )
-
-/**
- * Canonical source keys whose agents support session.send (继续发送指令 /
- * 手机上继续 vibe coding). Superset of [STOPPABLE_AGENT_SOURCES] plus Freebuff,
- * which queues messages through its orchestrator HTTP API. Like the stop list,
- * this is only a fallback — a probed capability
- * ("session.send") is authoritative once present.
- */
-private val SENDABLE_AGENT_SOURCES = setOf(
-    "claude", "claude-haha", "codex", "opencode", "deepseekharness", "freebuff",
-    // Electron/GUI agents continue by bringing their existing session window
-    // to the foreground through the PC window-focus proxy.
-    "trae", "traework", "zcode", "workbuddy", "doubao"
-)
-
-/**
- * Older PC builds exposed only agent.probe for the GUI proxy even though its
- * session.send handler already supported the window-focus continue action.
- * Keep those builds compatible while newer probes advertise session.send.
- */
-private val WINDOW_FOCUS_AGENT_SOURCES = setOf("trae", "traework", "zcode", "workbuddy", "doubao")
 
 /**
  * True when the phone can send session.stop for this message's agent.
@@ -312,26 +286,6 @@ fun NotifyMessage.isStoppable(): Boolean {
         AgentCapabilityCache.supports(key, AgentCapabilityCache.CAP_SESSION_STOP)
     } else {
         key in STOPPABLE_AGENT_SOURCES
-    }
-}
-
-/**
- * True when the phone can send a new instruction to this message's agent
- * (session.send) — the "在手机上继续 vibe coding" entry point.
- *
- * Same capability-first rule as [isStoppable]: a probed "session.send"
- * capability is authoritative, otherwise the [SENDABLE_AGENT_SOURCES]
- * fallback list applies.
- */
-fun NotifyMessage.canSendMessage(): Boolean {
-    if (sessionId.trim().isBlank()) return false
-    val key = canonicalSourceKey(source).trim().lowercase()
-    if (key.isBlank()) return false
-    return if (AgentCapabilityCache.hasEntry(key)) {
-        AgentCapabilityCache.supports(key, AgentCapabilityCache.CAP_SESSION_SEND) ||
-            key in WINDOW_FOCUS_AGENT_SOURCES
-    } else {
-        key in SENDABLE_AGENT_SOURCES
     }
 }
 
@@ -403,4 +357,75 @@ data class ServerConfig(
 
         fun normalizeHost(input: String): String = ConnectionQrCodec.normalizeHost(input)
     }
+}
+
+/**
+ * 一条历史连接地址。
+ *
+ * [host] 保存的是归一化后的地址原文，与「输入框里的值」「送给 WebSocketService 的值」
+ * 完全一致，回填时不做任何二次推导，避免历史里的地址连到别的地方。
+ *
+ * [lastUsedAt] 为最后一次**连接成功**的毫秒时间戳；`0` 表示真实时间不可知
+ * （老用户升级时由既有 server_host 播种），UI 渲染为「较早使用」。
+ */
+data class HostHistoryEntry(
+    val host: String,
+    val lastUsedAt: Long
+)
+
+/** 历史地址最多保留条数；超出后按使用时间淘汰最旧的一条。 */
+const val MAX_HOST_HISTORY = 10
+
+/**
+ * 历史地址的去重键。
+ *
+ * 不能直接比较字符串：`MessageRepository.normalizeServerHost` 会原样保留带 scheme 的输入，
+ * 于是同一台 PC 会以 `192.168.5.6` / `ws://192.168.5.6` / `ws://192.168.5.6:1122` /
+ * `http://192.168.5.6` 四种形态进入历史，按字符串去重会留下 4 条重复记录。
+ * 这里剥掉 scheme、去掉固定默认端口、统一小写后再比较。
+ *
+ * `wss://` 与 `https://` 必须与明文分开：TLS 隧道和局域网明文是两条不同的传输通道，
+ * 合并会让用户以为选了隧道、实际连的却是局域网。
+ */
+internal fun hostHistoryKey(host: String): String {
+    val value = host.trim().trimEnd('/')
+    val scheme = Regex("^([a-z][a-z0-9+.-]*://)", RegexOption.IGNORE_CASE)
+        .find(value)?.value.orEmpty()
+    val tls = scheme.equals("wss://", true) || scheme.equals("https://", true)
+    val authority = value.removePrefix(scheme).removeSuffix(":${ServerConfig.DEFAULT_PORT}")
+    return (if (tls) "tls:" else "plain:") + authority.lowercase()
+}
+
+/**
+ * 把 [host] 记为最近使用。
+ *
+ * - 同去重键的旧记录被替换，且**保留新写入的地址原文**，保证历史值始终等于当前实际使用的值。
+ * - 结果按使用时间倒序排列，超过 [MAX_HOST_HISTORY] 条时从尾部丢弃最旧记录。
+ */
+internal fun mergeHostHistory(
+    existing: List<HostHistoryEntry>,
+    host: String,
+    nowMs: Long
+): List<HostHistoryEntry> {
+    if (host.isBlank()) return existing
+    val key = hostHistoryKey(host)
+    return (listOf(HostHistoryEntry(host, nowMs)) + existing.filter { hostHistoryKey(it.host) != key })
+        .sortedByDescending { it.lastUsedAt }
+        .take(MAX_HOST_HISTORY)
+}
+
+/**
+ * 决定启动时使用的历史地址列表。
+ *
+ * 老用户升级后本地只有 `server_host`（曾经连接成功过的地址）而没有任何历史记录，
+ * 直接显示空列表会出现「输入框里有地址、历史却是空的」的割裂感，因此用该地址播种一条。
+ * 时间戳给 `0` 而不是当前时间：这条记录的真实使用时间确实不可知，
+ * UI 会渲染成「较早使用」，不谎报「刚刚使用」。
+ */
+internal fun initialHostHistory(
+    stored: List<HostHistoryEntry>,
+    savedHost: String
+): List<HostHistoryEntry> {
+    if (stored.isNotEmpty()) return stored
+    return if (savedHost.isBlank()) emptyList() else listOf(HostHistoryEntry(savedHost, 0L))
 }

@@ -29,7 +29,6 @@ namespace TapRelay
         private static readonly TimeSpan PollDelay = TimeSpan.FromMilliseconds(100);
         private static readonly HashSet<string> Caps = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "session.send",
             "session.stop",
             "agent.probe"
         };

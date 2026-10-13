@@ -16,7 +16,6 @@ package com.lan.notify.data
  */
 object AgentCapabilityCache {
 
-    const val CAP_SESSION_SEND = "session.send"
     const val CAP_SESSION_STOP = "session.stop"
     const val CAP_AGENT_PROBE = "agent.probe"
 

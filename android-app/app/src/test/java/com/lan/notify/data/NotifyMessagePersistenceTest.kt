@@ -135,24 +135,6 @@ class NotifyMessagePersistenceTest {
     }
 
     @Test
-    fun sentInstructionRoundTripsThroughStorage() {
-        val original = NotifyMessage(
-            type = "message",
-            content = "[claude] 任务已完成",
-            time = "2026-08-24T16:00:00+08:00",
-            source = "claude",
-            taskId = "session-1:turn-7",
-            sessionId = "session-1",
-            sentInstruction = "把登录接口加上重试"
-        )
-
-        val loaded = LocalStore.decodeMessages(LocalStore.encodeMessages(listOf(original))).single()
-
-        assertEquals(original, loaded)
-        assertEquals("把登录接口加上重试", loaded.sentInstruction)
-    }
-
-    @Test
     fun projectTitlePrefersActualProjectName() {
         val withWindowsPath = NotifyMessage(
             type = "message",

@@ -25,6 +25,7 @@ object MessageRepository {
     private val _dynamicEffectsEnabled = MutableStateFlow(LocalStore.DEFAULT_DYNAMIC_EFFECTS)
     private val _hostMasked = MutableStateFlow(false)
     private val _deviceName = MutableStateFlow(LocalStore.DEFAULT_DEVICE_NAME)
+    private val _hostHistory = MutableStateFlow<List<HostHistoryEntry>>(emptyList())
 
     val state: StateFlow<AppUiState> = _state.asStateFlow()
     val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
@@ -34,6 +35,9 @@ object MessageRepository {
     val dynamicEffectsEnabled: StateFlow<Boolean> = _dynamicEffectsEnabled.asStateFlow()
     val hostMasked: StateFlow<Boolean> = _hostMasked.asStateFlow()
     val deviceName: StateFlow<String> = _deviceName.asStateFlow()
+
+    /** 历史连接地址，最近使用在前，最多 [MAX_HOST_HISTORY] 条。 */
+    val hostHistory: StateFlow<List<HostHistoryEntry>> = _hostHistory.asStateFlow()
 
     val currentServerHost: String
         get() = _state.value.serverHost
@@ -87,6 +91,7 @@ object MessageRepository {
         _dynamicEffectsEnabled.value = localStore.loadDynamicEffectsEnabled()
         _hostMasked.value = localStore.loadHostMasked()
         _deviceName.value = localStore.loadDeviceName()
+        _hostHistory.value = initialHostHistory(localStore.loadHostHistory(), savedHost)
     }
 
     fun setOverlayDebugEnabled(enabled: Boolean) {
@@ -157,8 +162,8 @@ object MessageRepository {
     }
 
     fun updateServerHost(host: String) {
-        val normalized = normalizeServerHost(host)
-        _state.value = _state.value.copy(serverHost = normalized)
+        val sanitized = sanitizeServerHostInput(host)
+        _state.value = _state.value.copy(serverHost = sanitized)
     }
 
     /**
@@ -173,8 +178,50 @@ object MessageRepository {
         }
     }
 
+    /**
+     * 记录一次「地址被成功使用」，供设备管理里的历史地址列表使用。
+     *
+     * 调用方必须是**连接建立成功**的时机（`WebSocketService.markSocketVerified`），
+     * 不要在输入框变更或点击连接时调用：前者会把 `1`、`19`、`192` 这类半成品记进历史，
+     * 后者会把打错的地址记进历史。
+     *
+     * 去重、倒序与 10 条上限由 [mergeHostHistory] 统一处理。
+     */
+    fun recordHostUsage(host: String) {
+        val normalized = normalizeServerHost(host)
+        if (normalized.isBlank()) return
+        val next = mergeHostHistory(_hostHistory.value, normalized, System.currentTimeMillis())
+        _hostHistory.value = next
+        if (::localStore.isInitialized) {
+            localStore.saveHostHistory(next)
+        }
+    }
+
+    /**
+     * 清空历史地址。
+     *
+     * 只清 `host_history` 这个键，**不动** `server_host`：
+     * 后者是 [hasKnownGoodHost] / [lastKnownGoodHost] 的数据源，
+     * 一并清掉会让 `MainActivity.onStart` 的自动重连直接失效。
+     */
+    fun clearHostHistory() {
+        _hostHistory.value = emptyList()
+        if (::localStore.isInitialized) {
+            localStore.saveHostHistory(emptyList())
+        }
+    }
+
+    /**
+     * 严格闸门：用于**持久化与读取**（[rememberSuccessfulHost] / [hasKnownGoodHost] /
+     * [lastKnownGoodHost] / [recordHostUsage]）。空串表示「没有可用地址」。
+     *
+     * 不要把输入框的原始文本直接喂给本函数，见 [sanitizeServerHostInput]。
+     */
     private fun normalizeServerHost(input: String): String {
         val trimmed = input.trim()
+        // 回环地址在任何写法下都不可用，必须**先于** scheme 判断，
+        // 否则 `ws://127.0.0.1:1122` 会被下面的分支原样放行。
+        if (isLoopbackAddress(trimmed)) return ""
         // 保留 ws:// / wss:// scheme：ServerConfig 依赖前缀识别隧道地址
         // （wss://域名 = 443 公网隧道），剥掉后重连会退化成 ws:// 连 443 而失败。
         if (trimmed.startsWith("wss://", ignoreCase = true) ||
@@ -183,6 +230,48 @@ object MessageRepository {
             return trimmed
         }
         return ServerConfig.normalizeHost(trimmed)
+    }
+
+    /**
+     * 地址输入框的逐字符清洗。
+     *
+     * 与 [normalizeServerHost] 的唯一区别是：**容忍「还没输完」的中间态**。
+     * 输入框每次按键都要过一遍归一化，输到 `10.0.2.2:` 时端口为空、
+     * `ServerConfig.normalizeHost` 会判定非法 authority 返回空串；一旦把这个空串
+     * 写回输入框，用户刚敲的整段地址就被清空，永远输不进端口（实测踩过）。
+     *
+     * 注意**不能**对空结果一律回退成原串：回环地址是「明确拒绝」，
+     * 必须继续归一化成空串，否则 `localhost` 会被原样回填进输入框。
+     * 真正的合法性校验交给连接时——连不上会正常回到未连接态。
+     */
+    private fun sanitizeServerHostInput(input: String): String {
+        val trimmed = input.trim()
+        // 回环地址是「明确拒绝」，不是「还没输完」，不能走下面的 ifBlank 回退。
+        // 这行与 normalizeServerHost 内的同名判断是**故意重复**的：少了它，
+        // normalizeServerHost 返回的空串会被 ifBlank 换回原文，localhost 就复活了。
+        if (isLoopbackAddress(trimmed)) return ""
+        return normalizeServerHost(trimmed).ifBlank { trimmed }
+    }
+
+    /**
+     * 判断地址是否指向本机回环。
+     *
+     * App 跑在手机上，`localhost` / `127.0.0.1` / `[::1]` 永远指手机自己，不可能连到 PC，
+     * 因此一律视为不可用地址，不允许保存，也不允许在输入框里当「中间态」回填。
+     *
+     * 这里必须把 scheme、路径**和端口**都剥掉再比较：
+     * `ConnectionQrCodec.normalizeHost` 只拒绝裸的 `localhost` / `127.0.0.1`，
+     * `http://localhost:1122`、`ws://127.0.0.1:1122` 会被它归一化成可用的 authority。
+     * 若本函数照抄那种严格比较，回环地址就会顺着「容忍中间态」的通道重新泄漏回输入框。
+     */
+    private fun isLoopbackAddress(value: String): Boolean {
+        val authority = value.substringAfter("://", value).substringBefore('/').trim()
+        val host = if (authority.startsWith("[") && authority.contains("]")) {
+            authority.substring(1, authority.indexOf(']'))
+        } else {
+            authority.substringBefore(':')
+        }
+        return host.equals("localhost", ignoreCase = true) || host == "127.0.0.1" || host == "::1"
     }
 
     fun setConnectionStatus(status: ConnectionStatus) {
@@ -250,20 +339,6 @@ object MessageRepository {
             if (message.id == current.id) updated else message
         })
         return updated
-    }
-
-    /**
-     * 把手机端发出的指令原文记录到对应消息并持久化。agent.result 回执回显时
-     * 直接从消息读取，重启后历史仍可追溯；不再依赖 WebSocketService 的内存缓存。
-     */
-    fun recordSentInstruction(messageId: String, instruction: String) {
-        val trimmed = instruction.trim()
-        if (messageId.isBlank() || trimmed.isBlank()) return
-        saveMessages(_state.value.messages.map { message ->
-            if (message.id == messageId && message.sentInstruction != trimmed) {
-                message.copy(sentInstruction = trimmed)
-            } else message
-        })
     }
 
     fun markMessageRead(messageId: String) {

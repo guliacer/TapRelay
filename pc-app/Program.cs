@@ -351,7 +351,7 @@ namespace TapRelay
                 host = "[" + host + "]";
             }
 
-            return "http://" + host + ":" + config.ListenPort + "/send";
+            return "http://" + host + ":" + NotifyServerConfig.DefaultPort + "/send";
         }
 
         private static void WriteChatGPTLog(string message)

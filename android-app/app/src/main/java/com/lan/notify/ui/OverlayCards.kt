@@ -56,7 +56,6 @@ import com.lan.notify.data.MessageTimeFormatter
 import com.lan.notify.data.NotifyMessage
 import com.lan.notify.data.RegisteredApp
 import com.lan.notify.data.TaskState
-import com.lan.notify.data.canSendMessage
 import com.lan.notify.data.displayContent
 import com.lan.notify.data.hasApprovalAction
 import com.lan.notify.data.isWaitingTask
@@ -90,7 +89,6 @@ fun OverlayCards(
     onDismissAll: () -> Unit,
     onResolveApproval: ((NotifyMessage, String) -> Unit)? = null,
     onProcessWaiting: ((NotifyMessage) -> Unit)? = null,
-    onContinue: ((NotifyMessage) -> Unit)? = null,
     playEntrance: Boolean = false,
     dynamicEffectsEnabled: Boolean = true
 ) {
@@ -161,8 +159,7 @@ fun OverlayCards(
                     onDismiss = { onCardDismiss(message) },
                      onDismissAll = onDismissAll,
                      onResolveApproval = onResolveApproval,
-                     onProcessWaiting = onProcessWaiting,
-                     onContinue = onContinue,
+                      onProcessWaiting = onProcessWaiting,
                      dynamicEffectsEnabled = dynamicEffectsEnabled,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -188,7 +185,6 @@ private fun OverlayTaskCard(
     onDismissAll: () -> Unit,
     onResolveApproval: ((NotifyMessage, String) -> Unit)? = null,
     onProcessWaiting: ((NotifyMessage) -> Unit)? = null,
-    onContinue: ((NotifyMessage) -> Unit)? = null,
     dynamicEffectsEnabled: Boolean,
     modifier: Modifier = Modifier
 ) {
@@ -357,12 +353,7 @@ private fun OverlayTaskCard(
                                     Triple("处理", { onProcessWaiting?.invoke(message); Unit }, true)
                                 )
                             }
-                            if (message.canSendMessage()) {
-                                add(
-                                    Triple("继续", { onContinue?.invoke(message); Unit }, true)
-                                )
-                            }
-                            if (message.canSendMessage() || waitingTask) {
+                            if (waitingTask) {
                                 add(Triple("关闭", onDismiss, false))
                             } else {
                                 add(Triple("全部关闭", onDismissAll, false))

@@ -108,6 +108,14 @@ class ChannelTest {
     }
 
     @Test
+    fun workBuddyAiUsesIndependentChannelAndSourceKey() {
+        assertEquals(Channel.WorkBuddyAi, Channel.from("workbuddy-ai"))
+        assertEquals("workbuddy-ai", canonicalSourceKey(" WorkBuddy-AI "))
+        assertEquals("WorkBuddy AI", Channel.WorkBuddyAi.label)
+        assertEquals("A", Channel.WorkBuddyAi.letter)
+    }
+
+    @Test
     fun comfyUiSourceUsesOfficialChannel() {
         assertEquals(Channel.ComfyUI, Channel.from("comfyui"))
         assertEquals(Channel.ComfyUI, Channel.from("COMFY-UI"))

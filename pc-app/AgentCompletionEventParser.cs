@@ -42,6 +42,12 @@ namespace TapRelay
         /// 随广播下发手机端，用于「允许 / 拒绝」按钮回传 approval.resolve。
         /// </summary>
         internal string RequestId { get; set; } = string.Empty;
+        /// <summary>
+        /// Codex request_user_input 的原生 function call ID。该调用可能随后收到
+        /// function_call_output（例如 Default mode 下的 unavailable），只有在没有
+        /// 输出回传并经过宽限期后才允许广播 waiting。
+        /// </summary>
+        internal string CodexInputCallId { get; set; } = string.Empty;
         internal string EventKey { get; set; } = string.Empty;
     }
 
@@ -335,6 +341,7 @@ namespace TapRelay
                     Status = "waiting",
                     TaskId = taskId,
                     SessionId = sessionId,
+                    CodexInputCallId = ReadString(payload, "call_id"),
                     Cwd = cwd,
                     ProjectName = ProjectNameResolver.ResolveFolderFirst(
                         projectName,
@@ -352,6 +359,46 @@ namespace TapRelay
             finally
             {
                 argumentsDocument?.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// 读取 Codex function_call 的结果记录。request_user_input 在当前 Codex
+        /// Default 模式下可能先产生 function_call，随后返回
+        /// "request_user_input is unavailable in Default mode"；这不是用户等待状态。
+        /// </summary>
+        internal static bool TryReadCodexFunctionCallOutput(string line, out string callId)
+        {
+            callId = string.Empty;
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                return false;
+            }
+
+            try
+            {
+                using var json = JsonDocument.Parse(line);
+                var root = json.RootElement;
+                var payload = root.TryGetProperty("payload", out var nestedPayload) &&
+                              nestedPayload.ValueKind == JsonValueKind.Object
+                    ? nestedPayload
+                    : root;
+                if (!string.Equals(ReadString(root, "type"), "response_item", StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(ReadString(payload, "type"), "function_call_output", StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+
+                callId = FirstNonEmpty(
+                    ReadString(payload, "call_id"),
+                    ReadString(payload, "callId"),
+                    ReadString(root, "call_id"),
+                    ReadString(root, "callId"));
+                return !string.IsNullOrWhiteSpace(callId);
+            }
+            catch (JsonException)
+            {
+                return false;
             }
         }
 
@@ -1475,7 +1522,7 @@ namespace TapRelay
         /// </summary>
         private static string BuildDoubaoCompletedMessage(string taskLog)
         {
-            return SummarizeChatGPTDetail(taskLog);
+            return DoubaoTaskContentSource.BuildCompletedMessage(taskLog);
         }
 
         private static string BuildDoubaoSessionId(
@@ -2411,7 +2458,11 @@ namespace TapRelay
                 ReadWorkBuddyLogSessionId(line),
                 fallbackSessionId);
             var status = hasError && !isSuccessful ? "failed" : "completed";
-            var taskId = BuildWorkBuddyTaskId(sessionId, string.Empty, line, string.Empty);
+            // 与 executeStopHooks / Prompt completed 路径统一：sessionId 存在时直接以
+            // sessionId 作为 taskId，使同一会话的多路结束信号收敛为同一条去重主键。
+            var taskId = string.IsNullOrWhiteSpace(sessionId)
+                ? BuildWorkBuddyTaskId(string.Empty, string.Empty, line, string.Empty)
+                : sessionId.Trim();
             if (string.IsNullOrWhiteSpace(taskId))
             {
                 return false;
@@ -2427,6 +2478,167 @@ namespace TapRelay
                 EventKey = "workbuddy:" + status + ":" + taskId
             };
             return true;
+        }
+
+        /// <summary>
+        /// 读取 WorkBuddy 的 executeStopHooks 诊断行：
+        ///   [SessionHookManager] executeStopHooks sessionId=... stopReason=completed
+        ///   [SessionHookManager] executeStopHooks sessionId=... stopReason=cancelled
+        /// executeStopHooks 在普通模型回合、上下文压缩和自动重试时都会打印；即使
+        /// stopReason=completed，也只表示当前运行段结束，不能作为任务完成通知依据。
+        /// 该解析方法保留给诊断/兼容调用，生产通知路径不得直接分发其结果。
+        /// </summary>
+        internal static bool TryParseWorkBuddyStopHookLine(
+            string line, out AgentCompletionEventData result)
+        {
+            result = new AgentCompletionEventData();
+            if (string.IsNullOrWhiteSpace(line) ||
+                line.IndexOf("executeStopHooks", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                return false;
+            }
+
+            var sessionId = ReadWorkBuddyLogAssignment(line, "sessionId");
+            if (string.IsNullOrWhiteSpace(sessionId))
+            {
+                return false;
+            }
+
+            var stopReason = ReadWorkBuddyLogAssignment(line, "stopReason");
+            var status = WorkBuddyStatusFromStopReason(stopReason);
+            if (string.IsNullOrWhiteSpace(status))
+            {
+                return false;
+            }
+
+            result = new AgentCompletionEventData
+            {
+                Message = status == "completed"
+                    ? "WorkBuddy \u4efb\u52a1\u5df2\u5b8c\u6210"
+                    : "WorkBuddy \u4efb\u52a1\u5931\u8d25",
+                Source = "workbuddy",
+                Status = status,
+                TaskId = sessionId.Trim(),
+                SessionId = sessionId.Trim(),
+                EventKey = "workbuddy:" + status + ":" + sessionId.Trim()
+            };
+            return true;
+        }
+
+        /// <summary>
+        /// 解析 WorkBuddy 新版（含 2026-09-24 起）的会话级结束信号：
+        ///   [AcpView]  Prompt completed for session ..., stopReason: end_turn, finishReason: stop
+        ///   [AcpView]  Prompt completed for session ..., stopReason: cancelled, finishReason: ...
+        /// Prompt completed 在 AcpView 收到会话终态时打印一次，携带真实 sessionId 与
+        /// 终态 stopReason。stopReason=end_turn/stop 表示成功；cancelled/refusal/aborted
+        /// 表示取消/拒绝/中断。
+        /// </summary>
+        internal static bool TryParseWorkBuddyPromptCompletedLine(
+            string line, out AgentCompletionEventData result)
+        {
+            result = new AgentCompletionEventData();
+            if (string.IsNullOrWhiteSpace(line) ||
+                line.IndexOf("Prompt completed for session", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                return false;
+            }
+
+            var sessionId = ReadWorkBuddyPromptCompletedSessionId(line);
+            if (string.IsNullOrWhiteSpace(sessionId))
+            {
+                return false;
+            }
+
+            var stopReason = ReadWorkBuddyLogAssignment(line, "stopReason");
+            var status = WorkBuddyStatusFromStopReason(stopReason);
+            if (string.IsNullOrWhiteSpace(status))
+            {
+                return false;
+            }
+
+            result = new AgentCompletionEventData
+            {
+                Message = status == "completed"
+                    ? "WorkBuddy \u4efb\u52a1\u5df2\u5b8c\u6210"
+                    : "WorkBuddy \u4efb\u52a1\u5931\u8d25",
+                Source = "workbuddy",
+                Status = status,
+                TaskId = sessionId.Trim(),
+                SessionId = sessionId.Trim(),
+                EventKey = "workbuddy:" + status + ":" + sessionId.Trim()
+            };
+            return true;
+        }
+
+        internal static string ReadWorkBuddyPromptCompletedSessionId(string line)
+        {
+            const string marker = "for session ";
+            var index = line.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (index < 0)
+            {
+                return string.Empty;
+            }
+
+            var start = index + marker.Length;
+            var end = start;
+            while (end < line.Length &&
+                   line[end] != ',' && line[end] != ' ' && line[end] != ')' && line[end] != ']')
+            {
+                end++;
+            }
+
+            return end > start ? line.Substring(start, end - start).Trim() : string.Empty;
+        }
+
+        /// <summary>
+        /// 将 WorkBuddy 的 stopReason 归一到三态：
+        ///   "completed" —— 会话正常结束（end_turn / completed / stop / finished / max_turns / success）；
+        ///   "failed"    —— 会话确实以错误结束（failed / error 及其常见变体）；
+        ///   ""（空）    —— 非任务失败的「中间/用户态」，绝不广播为失败、也不广播为完成：
+        ///                 refusal=模型拒答（会话会继续）、interrupt*=被打断（会话继续）、
+        ///                 cancel*/abort*=用户取消/中止、pending/paused=等待。
+        /// 旧实现把 refusal/cancel/abort/interrupt 误归为 "failed"、又把真正的 "failed"/"error"
+        /// 漏归成空，导致「模型拒答」被当成任务失败、而真正的失败信号被丢弃
+        /// （见 09-24 世界杯会话 b91b6456 在 09:14:15 被误广播为 failed）。
+        /// </summary>
+        private static string WorkBuddyStatusFromStopReason(string stopReason)
+        {
+            var normalized = (stopReason ?? string.Empty).Trim().ToLowerInvariant();
+            if (string.IsNullOrEmpty(normalized))
+            {
+                return string.Empty;
+            }
+
+            // 终态·成功：模型正常结束本轮
+            if (string.Equals(normalized, "completed", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(normalized, "end_turn", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(normalized, "stop", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(normalized, "finished", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(normalized, "max_turns", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(normalized, "success", StringComparison.OrdinalIgnoreCase))
+            {
+                return "completed";
+            }
+
+            // 终态·失败：会话确实以错误结束
+            if (string.Equals(normalized, "failed", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(normalized, "error", StringComparison.OrdinalIgnoreCase) ||
+                normalized.StartsWith("error", StringComparison.Ordinal) ||
+                normalized.IndexOf("api_error", StringComparison.Ordinal) >= 0 ||
+                normalized.IndexOf("expired", StringComparison.Ordinal) >= 0 ||
+                normalized.IndexOf("timeout", StringComparison.Ordinal) >= 0 ||
+                normalized.IndexOf("context_window_exceeded", StringComparison.Ordinal) >= 0 ||
+                normalized.IndexOf("rate_limited", StringComparison.Ordinal) >= 0 ||
+                normalized.IndexOf("capacity", StringComparison.Ordinal) >= 0 ||
+                normalized.IndexOf("authentication", StringComparison.Ordinal) >= 0 ||
+                normalized.IndexOf("permission_denied", StringComparison.Ordinal) >= 0 ||
+                normalized.IndexOf("invalid_request", StringComparison.Ordinal) >= 0)
+            {
+                return "failed";
+            }
+
+            // 以下为「非任务失败」：拒答/打断/取消/中止/等待，绝不广播为失败。
+            return string.Empty;
         }
 
         private static bool ReadWorkBuddyResultFlag(string line, string name)
@@ -2452,7 +2664,7 @@ namespace TapRelay
             return value.StartsWith("true", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static string ReadWorkBuddyLogAssignment(string line, string name)
+        internal static string ReadWorkBuddyLogAssignment(string line, string name)
         {
             var marker = name + "=";
             var index = line.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
@@ -2568,7 +2780,7 @@ namespace TapRelay
                 : sessionId.Trim() + ":" + token;
         }
 
-        private static string ReadWorkBuddyLogTimestamp(string line)
+        internal static string ReadWorkBuddyLogTimestamp(string line)
         {
             var value = line ?? string.Empty;
             var start = value.IndexOf('[', StringComparison.Ordinal);

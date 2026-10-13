@@ -28,7 +28,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -36,7 +35,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -58,7 +56,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import com.lan.notify.data.AppUiState
 import com.lan.notify.data.ConnectionStatus
 import com.lan.notify.data.DEFAULT_PROJECT_VISIBLE_COUNT
@@ -67,9 +64,9 @@ import com.lan.notify.data.MessageTimeFormatter
 import com.lan.notify.data.NotifyMessage
 import com.lan.notify.R
 import com.lan.notify.data.appGroupKey
-import com.lan.notify.data.canSendMessage
 import com.lan.notify.data.displayContent
 import com.lan.notify.data.hasApprovalAction
+import com.lan.notify.data.HostHistoryEntry
 import com.lan.notify.data.isWaitingTask
 import com.lan.notify.data.projectGroupSourceKey
 import com.lan.notify.data.projectTitle
@@ -99,18 +96,19 @@ fun MainScreen(
     onMarkMessageRead: (String) -> Unit,
     onMarkAllMessagesRead: () -> Unit,
     onClearHistory: () -> Unit,
-    onSendToAgent: (NotifyMessage, String) -> Unit = { _, _ -> },
-    onContinueDialogVisibilityChanged: (Boolean) -> Unit = {},
     onResolveApproval: (NotifyMessage, String) -> Unit = { _, _ -> },
     onProcessWaiting: (NotifyMessage) -> Unit = {},
     dynamicEffectsEnabled: Boolean = true,
     onDynamicEffectsChange: (Boolean) -> Unit = {},
     deviceName: String = "",
-    onDeviceNameChange: (String) -> Unit = {}
+    onDeviceNameChange: (String) -> Unit = {},
+    hostHistory: List<HostHistoryEntry> = emptyList(),
+    hostMasked: Boolean = false,
+    onHostMaskedChange: (Boolean) -> Unit = {},
+    onClearHostHistory: () -> Unit = {}
 ) {
     var showPersonalProjectsDialog by rememberSaveable { mutableStateOf(false) }
     var showDeviceControlSheet by rememberSaveable { mutableStateOf(false) }
-    var continueTarget by remember { mutableStateOf<NotifyMessage?>(null) }
 
     Scaffold(
         topBar = {
@@ -287,7 +285,6 @@ fun MainScreen(
                                     message = message,
                                     registeredApps = uiState.registeredApps,
                                     onMarkMessageRead = onMarkMessageRead,
-                                    onContinue = { continueTarget = message },
                                     onResolveApproval = onResolveApproval,
                                     onProcessWaiting = onProcessWaiting
                                 )
@@ -322,9 +319,8 @@ fun MainScreen(
                                     onExpandCountChange = { count ->
                                         onSetProjectExpandCount(groupKey, count)
                                     },
-                                     onMarkMessageRead = onMarkMessageRead,
-                                     onContinue = { continueTarget = it },
-                                     onResolveApproval = onResolveApproval,
+                                      onMarkMessageRead = onMarkMessageRead,
+                                      onResolveApproval = onResolveApproval,
                                      onProcessWaiting = onProcessWaiting
                                 )
                             }
@@ -377,26 +373,14 @@ fun MainScreen(
             onSleep = onSleep,
             onShutdown = onShutdown,
             onOpenPermissionCheck = onOpenPermissionCheck,
+            hostHistory = hostHistory,
+            hostMasked = hostMasked,
+            onHostMaskedChange = onHostMaskedChange,
+            onClearHostHistory = onClearHostHistory,
             onDismiss = { showDeviceControlSheet = false }
         )
     }
 
-    continueTarget?.let { target ->
-        // The task cards are TYPE_APPLICATION_OVERLAY windows. Hide them while
-        // this in-app dialog is alive so they cannot cover the dialog surface.
-        DisposableEffect(target.id) {
-            onContinueDialogVisibilityChanged(true)
-            onDispose { onContinueDialogVisibilityChanged(false) }
-        }
-        ContinueAgentDialog(
-            message = target,
-            onDismiss = { continueTarget = null },
-            onSend = { text ->
-                continueTarget = null
-                onSendToAgent(target, text)
-            }
-        )
-    }
 }
 
 /** A visible action in a history card. */
@@ -472,118 +456,6 @@ private fun HistoryActionColumn(
     }
 }
 
-@Composable
-private fun ContinueAgentDialog(
-    message: NotifyMessage,
-    onDismiss: () -> Unit,
-    onSend: (String) -> Unit
-) {
-    var text by remember { mutableStateOf("") }
-    Dialog(onDismissRequest = onDismiss) {
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 18.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = appColors.Surface),
-            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text(
-                    text = "继续会话",
-                    color = appColors.TextPrimary,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = message.projectTitle("此会话"),
-                    color = appColors.TextSecondary,
-                    fontSize = 14.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = message.taskUsageLabel(),
-                    color = appColors.TextTertiary,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 104.dp, max = 280.dp),
-                    placeholder = { Text("输入给 agent 的下一条指令") },
-                    minLines = 3,
-                    maxLines = 10,
-                    shape = RoundedCornerShape(10.dp)
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    PlainButton(
-                        text = "取消",
-                        onClick = onDismiss,
-                        modifier = Modifier.weight(1f),
-                        variant = PlainButtonVariant.SECONDARY
-                    )
-                    PlainButton(
-                        text = "发送",
-                        onClick = { if (text.isNotBlank()) onSend(text.trim()) },
-                        modifier = Modifier.weight(1f),
-                        variant = if (text.isNotBlank()) {
-                            PlainButtonVariant.PRIMARY
-                        } else {
-                            PlainButtonVariant.SECONDARY
-                        }
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
- * 展示手机端「继续」发送的指令原文，独立于回执状态正文——
- * 让历史里能一眼看到“我发过什么”，而不是把它淹没在 agent.result 回执里。
- */
-@Composable
-private fun SentInstructionBubble(
-    instruction: String,
-    modifier: Modifier = Modifier
-) {
-    val trimmed = instruction.trim()
-    if (trimmed.isBlank()) return
-    Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(6.dp))
-            .background(appColors.UnreadBackground)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.Top
-    ) {
-        Text(
-            text = "已发送：",
-            fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = appColors.UnreadAccent
-        )
-        Text(
-            text = trimmed,
-            modifier = Modifier.weight(1f),
-            fontSize = 11.sp,
-            color = appColors.TextSecondary,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
-}
-
 /**
  * 鏃堕棿妯″紡涓嬬殑鍗曟潯娑堟伅琛岋細鍘?ListItem 琛屼负锛屾湭璇婚珮浜?+ 鏍囪鎸夐挳銆?
  */
@@ -592,7 +464,6 @@ private fun MessageRow(
     message: NotifyMessage,
     registeredApps: Map<String, com.lan.notify.data.RegisteredApp>,
     onMarkMessageRead: (String) -> Unit,
-    onContinue: () -> Unit,
     onResolveApproval: (NotifyMessage, String) -> Unit,
     onProcessWaiting: (NotifyMessage) -> Unit
 ) {
@@ -606,11 +477,9 @@ private fun MessageRow(
         )
         waiting -> buildList {
             add(HistoryAction("处理") { onProcessWaiting(message) })
-            if (message.canSendMessage()) add(HistoryAction("继续") { onContinue() })
             if (!message.isRead) add(HistoryAction("关闭") { onMarkMessageRead(message.id) })
         }
         else -> buildList {
-            if (message.canSendMessage()) add(HistoryAction("继续") { onContinue() })
             if (!message.isRead) add(HistoryAction("关闭") { onMarkMessageRead(message.id) })
         }
     }
@@ -684,7 +553,6 @@ private fun MessageRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            SentInstructionBubble(message.sentInstruction)
             Text(
                 text = if (message.isRead) {
                     "\u5df2\u8bfb \u00b7 ${MessageTimeFormatter.format(message.time)}"
@@ -713,7 +581,6 @@ private fun ProjectGroupCard(
     expandCount: Int,
     onExpandCountChange: (Int) -> Unit,
     onMarkMessageRead: (String) -> Unit,
-    onContinue: (NotifyMessage) -> Unit,
     onResolveApproval: (NotifyMessage, String) -> Unit = { _, _ -> },
     onProcessWaiting: (NotifyMessage) -> Unit = {}
 ) {
@@ -798,11 +665,9 @@ private fun ProjectGroupCard(
                     )
                     needsProcessing -> buildList {
                         add(HistoryAction("处理") { onProcessWaiting(message) })
-                        if (message.canSendMessage()) add(HistoryAction("继续") { onContinue(message) })
                         if (!message.isRead) add(HistoryAction("关闭") { onMarkMessageRead(message.id) })
                     }
                     else -> buildList {
-                        if (message.canSendMessage()) add(HistoryAction("继续") { onContinue(message) })
                         if (!message.isRead) add(HistoryAction("关闭") { onMarkMessageRead(message.id) })
                     }
                 }
@@ -855,10 +720,6 @@ private fun ProjectGroupCard(
                             fontSize = 11.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
-                        )
-                        SentInstructionBubble(
-                            instruction = message.sentInstruction,
-                            modifier = Modifier.padding(top = 4.dp)
                         )
                         Text(
                             text = if (message.isRead) {
@@ -1128,148 +989,4 @@ private fun BackToTopButton(
             )
         }
     }
-}
-
-@Composable
-private fun ConnectionPanel(
-    uiState: AppUiState,
-    onServerHostChange: (String) -> Unit,
-    onScanQr: () -> Unit,
-    onConnect: () -> Unit,
-    onDisconnect: () -> Unit,
-    onSleep: () -> Unit,
-    onShutdown: () -> Unit,
-    onOpenPermissionCheck: () -> Unit,
-    onMarkMessageRead: (String) -> Unit,
-    onMarkAllMessagesRead: () -> Unit,
-    dynamicEffectsEnabled: Boolean,
-    onDynamicEffectsChange: (Boolean) -> Unit,
-    isHostMasked: Boolean,
-    onHostMaskedChange: (Boolean) -> Unit
-) {
-    val statusColor = when (uiState.connectionStatus) {
-        ConnectionStatus.Connected -> appColors.Success
-        ConnectionStatus.Connecting,
-        ConnectionStatus.Reconnecting,
-        ConnectionStatus.Disconnected -> appColors.Danger
-    }
-
-    // IP 鑴辨晱寮€鍏筹細榛樿 false锛堟樉绀虹湡瀹?IP 渚夸簬缂栬緫锛夛紝鐐瑰嚮鎸夐挳鍒囨崲涓?true 鍚?
-    // OutlinedTextField 鏄剧ず鎺╃爜瀛楃涓插苟绂佹缂栬緫锛岄槻姝㈣劚鏁忓瓧绗︿覆姹℃煋瀹為檯鍊笺€?
-    val displayedHost = if (isHostMasked) maskIp(uiState.serverHost) else uiState.serverHost
-
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(text = "\u8fde\u63a5\u72b6\u6001")
-            Spacer(modifier = Modifier.width(8.dp))
-            // 默认端口属于连接状态的固定参数，与状态标题同行呈现，不额外占用一行。
-            Text(
-                text = "默认端口：1122",
-                color = appColors.TextSecondary,
-                fontSize = 12.sp
-            )
-            Spacer(modifier = Modifier.weight(1f))
-            Text(text = uiState.connectionStatus.label, color = statusColor)
-        }
-
-        OutlinedTextField(
-            value = displayedHost,
-            onValueChange = onServerHostChange,
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("PC 地址（IP / 域名）") },
-            singleLine = true,
-            readOnly = isHostMasked
-        )
-
-        // 连接类操作保持在同一行：主动连接、断开与二维码连接均直接影响会话状态。
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            PlainButton(
-                text = "\u8fde\u63a5",
-                onClick = onConnect,
-                enabled = uiState.serverHost.isNotBlank(),
-                variant = PlainButtonVariant.PRIMARY,
-                modifier = Modifier.weight(1f)
-            )
-            PlainButton(
-                text = "\u65ad\u5f00",
-                onClick = onDisconnect,
-                variant = PlainButtonVariant.PRIMARY,
-                modifier = Modifier.weight(1f)
-            )
-            PlainButton(
-                text = "扫码连接",
-                onClick = onScanQr,
-                variant = PlainButtonVariant.PRIMARY,
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        // 展示与系统设置集中收纳，避免和连接或电源命令混在一起。
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            PlainButton(
-                text = if (isHostMasked) "\u663e\u793a IP" else "\u9690\u85cf IP",
-                onClick = { onHostMaskedChange(!isHostMasked) },
-                variant = PlainButtonVariant.PRIMARY,
-                modifier = Modifier.weight(1f)
-            )
-            PlainButton(
-                text = "\u6743\u9650",
-                onClick = onOpenPermissionCheck,
-                variant = PlainButtonVariant.PRIMARY,
-                modifier = Modifier.weight(1f)
-            )
-            PlainButton(
-                text = "\u7701\u7535",
-                onClick = { onDynamicEffectsChange(!dynamicEffectsEnabled) },
-                variant = PlainButtonVariant.PRIMARY,
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        // PC 电源控制独立成组：睡眠 / 关机通过 WebSocket control 指令下发到电脑执行。
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            PlainButton(
-                text = "\u7761\u7720",
-                onClick = onSleep,
-                variant = PlainButtonVariant.PRIMARY,
-                modifier = Modifier.weight(1f)
-            )
-            PlainButton(
-                text = "\u5173\u673a",
-                onClick = onShutdown,
-                variant = PlainButtonVariant.PRIMARY,
-                modifier = Modifier.weight(1f)
-            )
-        }
-    }
-}
-
-/**
- * IPv4 鑴辨晱锛氫繚鐣欐瘡娈甸瀛楃锛屽叾浣欐浛鎹负 *銆?
- * - `192.168.5.35` -> `1**.1**.*.3*`
- * - 闈?IPv4 鏍煎紡锛堟鏁?=4 鎴栧惈闈炴暟瀛楁锛夊師鏍疯繑鍥烇紝閬垮厤璇鐞嗙敤鎴疯緭鍏ヤ腑鐨勯潪 IP 鏂囨湰銆?
- */
-internal fun maskIp(input: String): String {
-    val trimmed = input.trim()
-    if (trimmed.isEmpty()) return input
-    // 分离 scheme 前缀（ws:// / wss://）与端口后缀（:443），分别保留。
-    val scheme = Regex("^([a-z][a-z0-9+.-]*://)").find(trimmed)?.value.orEmpty()
-    val noScheme = if (scheme.isNotEmpty()) trimmed.removePrefix(scheme) else trimmed
-    val portSuffix = Regex("(:\\d+)$").find(noScheme)?.value.orEmpty()
-    val hostPart = if (portSuffix.isNotEmpty()) noScheme.removeSuffix(portSuffix) else noScheme
-    val segments = hostPart.split(".")
-
-    val isIpv4 = segments.size == 4 && segments.all { it.toIntOrNull() != null }
-    val isDomain = !isIpv4 && segments.size >= 2 &&
-        segments.all { Regex("^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$").matches(it) } &&
-        segments.last().any { it.isLetter() }
-    if (!isIpv4 && !isDomain) return input
-
-    val masked = segments.joinToString(".") { segment ->
-        if (segment.isEmpty()) "*" else segment.first() + "*".repeat(segment.length - 1)
-    }
-    return scheme + masked + portSuffix
 }

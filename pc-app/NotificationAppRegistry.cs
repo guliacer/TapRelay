@@ -28,7 +28,7 @@ namespace TapRelay
         private static readonly HashSet<string> ReservedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "claude", "codex", "trae", "trae-solo", "traework", "zcode", "doubao",
-            "suyan", "baidunetdisk", "quarknetdisk", "quarknetdisk-upload", "adrive", "adrive-upload", "workbuddy", "comfyui", "opencode", "deepseekharness", "freebuff", "taprelay"
+            "suyan", "baidunetdisk", "quarknetdisk", "quarknetdisk-upload", "adrive", "adrive-upload", "workbuddy", "workbuddy-ai", "comfyui", "opencode", "deepseekharness", "freebuff", "taprelay"
         };
         private static readonly string RegistryPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

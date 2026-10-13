@@ -24,6 +24,7 @@ enum class Channel(val label: String, val color: Color, val letter: String) {
     QuarkNetdisk("\u5938\u514b\u7f51\u76d8", AppTokens.ChannelQuarkNetdisk, "K"),
     Adrive("\u963f\u91cc\u4e91\u76d8", AppTokens.ChannelAdrive, "A"),
     WorkBuddy("WorkBuddy", AppTokens.ChannelWorkBuddy, "W"),
+    WorkBuddyAi("WorkBuddy AI", AppTokens.ChannelWorkBuddyAi, "A"),
     ComfyUI("ComfyUI", AppTokens.ChannelComfyUI, "F"),
     Opencode("OpenCode", AppTokens.ChannelOpencode, "O"),
     DeepseekHarness("DeepSeek Harness", AppTokens.ChannelDeepseekHarness, "N"),
@@ -54,6 +55,7 @@ enum class Channel(val label: String, val color: Color, val letter: String) {
             // 上的线路别名（见 NotifyServer.ToWireSource），手机端必须归并到同一渠道，
             // 否则卡片落入 Unknown。
             "workbuddy", "workbuddy-remote" -> WorkBuddy
+            "workbuddy-ai" -> WorkBuddyAi
             "comfyui", "comfy-ui", "comfy_ui" -> ComfyUI
             "opencode", "open-code", "open_code" -> Opencode
             "deepseekharness", "deepseek-harness", "deepseek_harness", "deepseek harness" -> DeepseekHarness
@@ -83,6 +85,7 @@ fun canonicalSourceKey(source: String): String = when (Channel.from(source)) {
     Channel.QuarkNetdisk -> "quarknetdisk"
     Channel.Adrive -> "adrive"
     Channel.WorkBuddy -> "workbuddy"
+    Channel.WorkBuddyAi -> "workbuddy-ai"
     Channel.ComfyUI -> "comfyui"
     Channel.Opencode -> "opencode"
     Channel.DeepseekHarness -> "deepseekharness"

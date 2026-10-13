@@ -42,22 +42,6 @@
                 android:orientation="vertical">
 
                 <Button
-                    android:id="@+id/notification_continue"
-                    android:layout_width="match_parent"
-                    android:layout_height="20dp"
-                    android:layout_marginTop="3dp"
-                    android:background="@drawable/notification_card_button"
-                    android:includeFontPadding="false"
-                    android:minHeight="0dp"
-                    android:minWidth="0dp"
-                    android:paddingStart="2dp"
-                    android:paddingEnd="2dp"
-                    android:text="继续"
-                    android:textColor="#FFFFFFFF"
-                    android:textSize="9sp"
-                    android:visibility="gone" />
-
-                <Button
                     android:id="@+id/notification_dismiss_all"
                     android:layout_width="match_parent"
                     android:layout_height="20dp"

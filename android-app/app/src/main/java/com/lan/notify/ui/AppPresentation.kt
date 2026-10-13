@@ -3,9 +3,11 @@ package com.lan.notify.ui
 import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -58,7 +60,7 @@ fun AppIcon(
             bitmap = bitmap,
             contentDescription = contentDescription ?: presentation.label,
             contentScale = ContentScale.Fit,
-            modifier = modifier
+            modifier = modifier.clip(CircleShape)
         )
     } else {
         ChannelIcon(

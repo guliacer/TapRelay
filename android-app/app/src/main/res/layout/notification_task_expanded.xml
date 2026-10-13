@@ -76,24 +76,6 @@
             android:visibility="gone" />
 
         <Button
-            android:id="@+id/notification_expanded_continue"
-            android:layout_width="0dp"
-            android:layout_height="28dp"
-            android:layout_marginStart="3dp"
-            android:layout_marginEnd="3dp"
-            android:layout_weight="1"
-            android:background="@drawable/notification_card_button"
-            android:includeFontPadding="false"
-            android:minHeight="0dp"
-            android:minWidth="0dp"
-            android:paddingStart="4dp"
-            android:paddingEnd="4dp"
-            android:text="继续"
-            android:textColor="#FFFFFFFF"
-            android:textSize="11sp"
-            android:visibility="gone" />
-
-        <Button
             android:id="@+id/notification_expanded_process"
             android:layout_width="0dp"
             android:layout_height="28dp"

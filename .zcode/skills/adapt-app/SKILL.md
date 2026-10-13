@@ -7,7 +7,7 @@
 ## 执行顺序
 
 1. 读取 `W:\TapRelay\CLAUDE.md`、相关编号规则、`W:\TapRelay\11-应用识别与适配规则.md` 和 `W:\TapRelay\09-问题与优化记录.md` 中的相关主题。
-2. 只读确认应用的安装目录、进程名、日志/数据库/API 来源。优先使用用户提供的路径或应用自身配置，不做全盘扫描。
+2. 只读确认应用的安装目录、进程名、日志/数据库/API 来源。优先使用用户提供的路径或应用自身配置，不做全盘扫描。安装判定必须遵守《应用识别与适配规则》R2 的"卸载必消失"证据标准：只认可信安装根内可执行文件、有效卸载注册表项（附文件校验）、APPX 包、从可信根运行的进程、显式环境变量声明；日志目录、会话/监控数据库、缓存、npm CLI shim 等卸载后残留的数据一律不得作为"已安装"的唯一信号。同时必须实测安装布局，列出启动文件与"缺一个程序即不可用"的必须文件清单并登记进 `AppInstallSignature` 签名表——残缺安装（启动 exe 在但核心文件被删）按未安装处理；可选资源不得列入必须清单。
 3. 找到 `completed`、`failed`、`waiting`、取消/停止和重复事件的真实样本，记录原始证据、状态映射、`requiresAction` 语义和去重键。三种强制状态必须各有真实样本；用户取消必须保持静默或映射为明确的 `stopped` 状态，不能误报失败。waiting 若可能被自动模式快速完成，必须登记后经宽限期复核，不能在瞬时工具事件上直接广播。
 4. 为每种强制状态找到真实任务日志来源：完成取 Agent 最终回复、应用结果或生成物摘要；失败取错误详情、失败步骤或退出码；待处理取实际提问、审批对象或阻塞详情。不得用用户原始提示词、会话标题、工具名列表或状态标题代替完成日志。
 5. 只有同时满足“状态证据可复核”和“正文日志可复核”才算适配完成；任何状态缺少真实日志时标记为“待补充数据源”，不得用“智能体任务已完成”等模板补位。
@@ -53,7 +53,7 @@ Invoke-RestMethod -Uri 'http://localhost:1122/send' -Method Post `
 
 - 不修改目标应用配置，不注入目标进程，不模拟点击，不安装开机自启。
 - 不使用第二端口、公网服务、云端数据库或第三方推送服务。
-- 不注册 `claude`、`codex`、`trae`、`traework`、`zcode`、`doubao`、`qwen`、`suyan`、`baidunetdisk`、`quarknetdisk`、`quarknetdisk-upload`、`comfyui`、`opencode`、`taprelay` 等内置键；其中千问已列入适配黑名单，检测到时只提示暂不支持，不得重新开启适配。ComfyUI 使用官方 `comfyui` 键与官方图标，禁止以第三方改版（如 ComfyNexus）名称或图标注册。OpenCode 使用官方 `opencode` 键与官方图标，通过 `~/.local/share/opencode/opencode.db` 的 `message` 表监听任务终态。
+- 不注册 `claude`、`codex`、`trae`、`traework`、`zcode`、`doubao`、`qwen`、`suyan`、`baidunetdisk`、`quarknetdisk`、`quarknetdisk-upload`、`comfyui`、`opencode`、`taprelay`、`workbuddy`、`workbuddy-remote` 等内置键；其中千问已列入适配黑名单，检测到时只提示暂不支持，不得重新开启适配。ComfyUI 使用官方 `comfyui` 键与官方图标，禁止以第三方改版（如 ComfyNexus）名称或图标注册。OpenCode 使用官方 `opencode` 键与官方图标，通过 `~/.local/share/opencode/opencode.db` 的 `message` 表监听任务终态。WorkBuddy 使用官方 `workbuddy` 键与官方绿色图标（品牌色 `#00BC90`），通过 `~/.workbuddy/logs/**` 递归监听会话完成信号（Prompt completed / executeStopHooks），不得重新注册或改用其它键。
 - 不把“看见某个 UI 文案”当作任务完成证据，除非它能与应用自身的稳定事件或数据记录绑定。
 - 不把“任务已完成”“智能体任务已完成”“任务失败”“需要确认”等状态模板作为新应用的 `message` 或 `taskLog`；状态写入 `status`，正文写入真实任务日志。
 - 不将 `parsed_query`、用户提示词或会话标题冒充 Agent 最终总结；不将子代理完成、中间工具步骤、自动模式瞬时事件冒充外层任务终态。

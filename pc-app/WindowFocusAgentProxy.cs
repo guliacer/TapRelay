@@ -21,22 +21,24 @@ namespace TapRelay
     {
         private static readonly HashSet<string> Caps = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "agent.probe",
-            "session.send"
+            "agent.probe"
         };
 
         private readonly WindowFocusConfig _config;
         private readonly Action<string> _log;
+        private readonly Action<string> _detailLog;
         private string? _resolvedBinary;
         private bool _binaryProbed;
 
         public string AgentKey => _config.AgentKey;
         public HashSet<string> Capabilities => Caps;
 
-        public WindowFocusAgentProxy(WindowFocusConfig config, Action<string> log)
+        public WindowFocusAgentProxy(WindowFocusConfig config, Action<string> log, Action<string>? detailLog = null)
         {
             _config = config ?? throw new ArgumentNullException(nameof(config));
             _log = log ?? throw new ArgumentNullException(nameof(log));
+            // 可执行文件探测细节只写诊断文件，首页只保留用户可读的告警。
+            _detailLog = detailLog ?? log;
         }
 
         public Task<AgentProbeResult> ProbeAsync(CancellationToken cancellationToken)
@@ -210,12 +212,12 @@ namespace TapRelay
                 if (File.Exists(expanded))
                 {
                     _resolvedBinary = expanded;
-                    _log($"{_config.AgentKey} binary resolved: {expanded}");
+                    _detailLog($"{_config.AgentKey} binary resolved: {expanded}");
                     return expanded;
                 }
             }
 
-            _log($"{_config.AgentKey} binary not found in any candidate path");
+            _detailLog($"{_config.AgentKey} binary not found in any candidate path");
             return null;
         }
 
@@ -610,10 +612,12 @@ namespace TapRelay
             BinaryCandidates = new[]
             {
                 @"%LOCALAPPDATA%\Programs\WorkBuddy\WorkBuddy.exe",
-                @"%ProgramFiles%\WorkBuddy\WorkBuddy.exe"
+                @"%ProgramFiles%\WorkBuddy\WorkBuddy.exe",
+                @"%ProgramFiles(x86)%\WorkBuddyAI\WorkBuddyAI.exe"
             },
             WindowTitle = "WorkBuddy",
-            ProcessNames = new[] { "WorkBuddy" },
+            // WorkBuddyAI（国际版）复用 workbuddy 键，进程基名为 WorkBuddyAI。
+            ProcessNames = new[] { "WorkBuddy", "WorkBuddyAI" },
             BuildLaunchArgs = _ => string.Empty,
             InjectText = true
         };
@@ -662,7 +666,7 @@ namespace TapRelay
         /// <summary>Build launch arguments when the app is not running. Parameter: cwd.</summary>
         public Func<string, string> BuildLaunchArgs { get; set; } = _ => string.Empty;
 
-        /// <summary>Whether session.send should paste and submit text in the GUI composer.</summary>
+        /// <summary>Whether the adapter can interact with the GUI composer.</summary>
         public bool InjectText { get; set; }
 
         /// <summary>Whether a running single-instance app should be focused without starting another process.</summary>

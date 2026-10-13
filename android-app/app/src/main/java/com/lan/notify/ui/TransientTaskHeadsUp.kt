@@ -35,7 +35,6 @@ import com.lan.notify.data.RegisteredApp
 import com.lan.notify.data.TaskDurationFormatter
 import com.lan.notify.data.TaskState
 import com.lan.notify.data.TaskTokenFormatter
-import com.lan.notify.data.canSendMessage
 import com.lan.notify.data.displayContent
 import com.lan.notify.data.hasApprovalAction
 import com.lan.notify.data.isWaitingTask
@@ -55,8 +54,7 @@ fun TransientTaskHeadsUp(
     registeredApps: Map<String, RegisteredApp>,
     onDismiss: () -> Unit,
     onResolveApproval: ((NotifyMessage, String) -> Unit)? = null,
-    onProcessWaiting: ((NotifyMessage) -> Unit)? = null,
-    onContinue: ((NotifyMessage) -> Unit)? = null
+    onProcessWaiting: ((NotifyMessage) -> Unit)? = null
 ) {
     val state = TaskState.from(message.status)
     val accent = when (state) {
@@ -109,14 +107,7 @@ fun TransientTaskHeadsUp(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(
-                        if (!message.hasApprovalAction() &&
-                            message.isWaitingTask() &&
-                            message.canSendMessage()
-                        ) {
-                            124.dp
-                        } else {
-                            96.dp
-                        }
+                        if (!message.hasApprovalAction() && message.isWaitingTask()) 124.dp else 96.dp
                     )
             ) {
                 TransientActionSurface(
@@ -124,8 +115,7 @@ fun TransientTaskHeadsUp(
                      registeredApps = registeredApps,
                      onDismiss = onDismiss,
                      onResolveApproval = onResolveApproval,
-                     onProcessWaiting = onProcessWaiting,
-                     onContinue = onContinue,
+                      onProcessWaiting = onProcessWaiting,
                      modifier = Modifier
                         .width(108.dp)
                         .fillMaxHeight()
@@ -149,7 +139,6 @@ private fun TransientActionSurface(
     onDismiss: () -> Unit,
     onResolveApproval: ((NotifyMessage, String) -> Unit)?,
     onProcessWaiting: ((NotifyMessage) -> Unit)?,
-    onContinue: ((NotifyMessage) -> Unit)?,
     modifier: Modifier = Modifier
 ) {
     val shape = RoundedCornerShape(14.dp)
@@ -188,18 +177,6 @@ private fun TransientActionSurface(
                     TransientActionButton(
                         text = "处理",
                         onClick = { onProcessWaiting?.invoke(message) }
-                    )
-                    if (message.canSendMessage()) {
-                        TransientActionButton(
-                            text = "继续",
-                            onClick = { onContinue?.invoke(message) }
-                        )
-                    }
-                    TransientActionButton(text = "关闭", onClick = onDismiss)
-                } else if (message.canSendMessage()) {
-                    TransientActionButton(
-                        text = "继续",
-                        onClick = { onContinue?.invoke(message) }
                     )
                     TransientActionButton(text = "关闭", onClick = onDismiss)
                 } else {

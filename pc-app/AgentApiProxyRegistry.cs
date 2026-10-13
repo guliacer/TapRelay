@@ -33,7 +33,7 @@ namespace TapRelay
             }
         }
 
-        public static IAgentApiProxy GetOrNull(string agentKey)
+        public static IAgentApiProxy? GetOrNull(string agentKey)
         {
             var key = NormalizeKey(agentKey);
             lock (Gate)
@@ -71,7 +71,13 @@ namespace TapRelay
 
         private static string NormalizeKey(string key)
         {
-            return (key ?? string.Empty).Trim().ToLowerInvariant();
+            var normalized = (key ?? string.Empty).Trim().ToLowerInvariant();
+            return normalized switch
+            {
+                "workbuddy-ai" => "workbuddy",
+                "workbuddy-remote" => "workbuddy",
+                _ => normalized
+            };
         }
     }
 }

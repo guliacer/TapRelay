@@ -26,13 +26,13 @@ namespace TapRelay
     {
         private static readonly HashSet<string> Caps = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "session.send",
             "session.stop",
             "agent.probe"
         };
 
         private readonly ShellAgentConfig _config;
         private readonly Action<string> _log;
+        private readonly Action<string> _detailLog;
         private readonly ConcurrentDictionary<string, RunningTurn> _running =
             new ConcurrentDictionary<string, RunningTurn>(StringComparer.OrdinalIgnoreCase);
         private readonly SemaphoreSlim[] _sessionLocks = CreateSessionLocks();
@@ -43,10 +43,13 @@ namespace TapRelay
         public string AgentKey => _config.AgentKey;
         public HashSet<string> Capabilities => Caps;
 
-        public ShellAgentApiProxy(ShellAgentConfig config, Action<string> log)
+        public ShellAgentApiProxy(ShellAgentConfig config, Action<string> log, Action<string>? detailLog = null)
         {
             _config = config ?? throw new ArgumentNullException(nameof(config));
             _log = log ?? throw new ArgumentNullException(nameof(log));
+            // 可执行文件路径解析属于实现细节：成功时是噪音，失败时业务层会另发一条
+            // 用户可读的告警，所以这里只写诊断文件。
+            _detailLog = detailLog ?? log;
         }
 
         public Task<AgentProbeResult> ProbeAsync(CancellationToken cancellationToken)
@@ -336,12 +339,12 @@ namespace TapRelay
                     if (File.Exists(expanded))
                     {
                         _resolvedBinary = expanded;
-                        _log($"{_config.AgentKey} binary resolved: {expanded}");
+                        _detailLog($"{_config.AgentKey} binary resolved: {expanded}");
                         return expanded;
                     }
                 }
 
-                _log($"{_config.AgentKey} binary not found in any candidate path");
+                _detailLog($"{_config.AgentKey} binary not found in any candidate path");
                 return null;
             }
         }

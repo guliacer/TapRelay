@@ -29,20 +29,22 @@ namespace TapRelay
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
         private static readonly HashSet<string> Caps = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "agent.probe",
-            "session.send"
+            "agent.probe"
         };
 
         private readonly Action<string> _log;
+        private readonly Action<string> _detailLog;
         private string? _resolvedBinary;
         private bool _binaryProbed;
 
         public string AgentKey => "claude-haha";
         public HashSet<string> Capabilities => Caps;
 
-        public ClaudeHahaAgentProxy(Action<string> log)
+        public ClaudeHahaAgentProxy(Action<string> log, Action<string>? detailLog = null)
         {
             _log = log ?? throw new ArgumentNullException(nameof(log));
+            // 可执行文件探测细节只写诊断文件，首页只保留用户可读的告警。
+            _detailLog = detailLog ?? log;
         }
 
         public Task<AgentProbeResult> ProbeAsync(CancellationToken cancellationToken)
@@ -458,12 +460,12 @@ namespace TapRelay
                 if (File.Exists(expanded))
                 {
                     _resolvedBinary = expanded;
-                    _log("claude-haha binary resolved: " + expanded);
+                    _detailLog("claude-haha binary resolved: " + expanded);
                     return expanded;
                 }
             }
 
-            _log("claude-haha binary not found in any candidate path");
+            _detailLog("claude-haha binary not found in any candidate path");
             return null;
         }
 

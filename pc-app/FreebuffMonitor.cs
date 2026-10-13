@@ -1008,21 +1008,14 @@ namespace TapRelay
                 return true;
             }
 
+            // 只认桌面版可执行文件。会话库 ~/.config/freebuff-desktop 是卸载后
+            // 仍残留的数据目录，不能作为安装证据（同 OpenCode 的 npm CLI shim 结论）。
             var exe = Path.Combine(
                 AgentLogPaths.GetLocalApplicationDataRoot(),
                 "Programs",
                 "@codebufffreebuff-desktop",
                 "Freebuff.exe");
-            if (File.Exists(exe)) return true;
-
-            try
-            {
-                return FindDatabases().Any();
-            }
-            catch
-            {
-                return false;
-            }
+            return File.Exists(exe);
         }
 
         /// <summary>

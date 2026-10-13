@@ -25,12 +25,12 @@ import com.lan.notify.data.RegisteredApp
 import com.lan.notify.data.RelayConfig
 import com.lan.notify.data.ServerConfig
 import com.lan.notify.data.canonicalSourceKey
-import com.lan.notify.data.canSendMessage
 import com.lan.notify.data.normalizeMessageSource
 import com.lan.notify.data.safeActionUri
 import com.lan.notify.data.OverlayExpansion
 import com.lan.notify.data.advance
 import com.lan.notify.data.deriveOverlayState
+import com.lan.notify.data.maskHostInText
 import com.lan.notify.MainActivity
 import com.lan.notify.notification.NotificationHelper
 import com.lan.notify.overlay.TapRelayOverlayController
@@ -97,8 +97,17 @@ class WebSocketService : LifecycleService() {
     @Volatile private var relayConfig: RelayConfig? = null
     private val pendingApprovalControls = ConcurrentLinkedQueue<ApprovalControl>()
     private val pendingPcPowerControls = ConcurrentLinkedQueue<PcPowerControl>()
-    /** 继续会话只保留最新一条尚未写入 WebSocket 的指令，避免断线期间累积旧消息。 */
+    /** 远程控制请求只保留最新一条尚未写入 WebSocket 的指令，避免断线期间累积旧消息。 */
     private val pendingAgentCall = AtomicReference<AgentCall?>(null)
+
+    /**
+     * 最近一次前台通知的文案**原文**（未脱敏）与其中的地址。
+     *
+     * 刻意保存未脱敏的原文：「隐藏地址」开关是随时可切的，切换后要按最新开关重发通知，
+     * 若这里存的是已脱敏串，重发也只会重复同一个掩码，开关看起来失效。
+     */
+    private var lastForegroundContent: String = "\u672a\u8fde\u63a5"
+    private var lastForegroundHost: String? = null
 
     private val reconnectRunnable = Runnable { connectSocket() }
     private val heartbeatRunnable = object : Runnable {
@@ -155,6 +164,15 @@ class WebSocketService : LifecycleService() {
         lifecycleScope.launch {
             MessageRepository.dynamicEffectsEnabled.collect {
                 handler.post { showIsland() }
+            }
+        }
+        // 「隐藏地址」开关变化时立即重发前台通知。
+        // 已连接状态下通知文案不会自己刷新：不重发的话，用户打开开关后锁屏上仍是明文地址，
+        // 要等到下一次连接事件才生效，开关看起来是坏的。
+        // 与上面几个收集同属「开关 -> 重渲染」模式；首帧会重发一次相同文案，无副作用。
+        lifecycleScope.launch {
+            MessageRepository.hostMasked.collect {
+                handler.post { postForeground() }
             }
         }
     }
@@ -281,9 +299,7 @@ class WebSocketService : LifecycleService() {
                 val agentKey = intent.getStringExtra(EXTRA_AGENT_KEY)?.trim().orEmpty()
                 val method = intent.getStringExtra(EXTRA_AGENT_METHOD)?.trim().orEmpty()
                 val sessionId = intent.getStringExtra(EXTRA_AGENT_SESSION_ID)?.trim().orEmpty()
-                val text = intent.getStringExtra(EXTRA_AGENT_TEXT)?.trim().orEmpty()
-                val messageId = intent.getStringExtra(EXTRA_AGENT_MESSAGE_ID)?.trim().orEmpty()
-                if (agentKey.isBlank() || method.isBlank()) {
+                if (agentKey.isBlank() || method != METHOD_SESSION_STOP) {
                     Log.w(tag, "ignored invalid agent call agentKey=$agentKey method=$method")
                     return START_STICKY
                 }
@@ -293,24 +309,19 @@ class WebSocketService : LifecycleService() {
                 candidateIndex = 0
                 shouldReconnect = true
                 acquireWakeLock()
-                // 把指令原文持久化到对应消息（而非仅存内存），回执回显与重启追溯都从消息读。
-                if (messageId.isNotBlank() && text.isNotBlank()) {
-                    MessageRepository.recordSentInstruction(messageId, text)
-                }
                 Log.i(
                     tag,
-                    "queue agent.call agentKey=$agentKey method=$method " +
-                        "sessionId=$sessionId messageId=$messageId textLength=${text.length}"
+                    "queue agent.call agentKey=$agentKey method=$method sessionId=$sessionId"
                 )
                 val currentSocket = socket
-                if (currentSocket == null || !sendAgentCall(currentSocket, agentKey, method, sessionId, text, messageId)) {
-                    val replacement = AgentCall(agentKey, method, sessionId, text, messageId)
+                if (currentSocket == null || !sendAgentCall(currentSocket, agentKey, method, sessionId)) {
+                    val replacement = AgentCall(agentKey, method, sessionId)
                     val previous = pendingAgentCall.getAndSet(replacement)
                     if (previous != null) {
                         Log.i(
                             tag,
-                            "replaced pending agent.call oldMessageId=${previous.messageId} " +
-                                "newMessageId=$messageId"
+                            "replaced pending agent.call oldSessionId=${previous.sessionId} " +
+                                "newSessionId=$sessionId"
                         )
                     }
                     if (currentSocket == null) {
@@ -431,8 +442,7 @@ class WebSocketService : LifecycleService() {
                         },
                         onAutoDismiss = { showIsland() },
                         onResolveApproval = { target, decision -> resolveApprovalFromOverlay(target, decision) },
-                        onProcessWaiting = { target -> processWaitingFromOverlay(target) },
-                        onContinue = { target -> continueFromOverlay(target) }
+                        onProcessWaiting = { target -> processWaitingFromOverlay(target) }
                     )
                 } else {
                     false
@@ -705,7 +715,6 @@ class WebSocketService : LifecycleService() {
                 resolveApprovalFromOverlay(message, decision)
             },
             onProcessWaiting = { message -> processWaitingFromOverlay(message) },
-            onContinue = { message -> continueFromOverlay(message) },
             debugEnabled = MessageRepository.overlayDebugEnabled.value,
             dynamicEffectsEnabled = MessageRepository.dynamicEffectsEnabled.value
         )
@@ -751,17 +760,6 @@ class WebSocketService : LifecycleService() {
         runCatching { startActivity(intent) }
             .onFailure { Log.w(tag, "waiting task action launch failed", it) }
         showIsland()
-    }
-
-    /** Open the existing session input dialog from the expanded capsule card. */
-    private fun continueFromOverlay(message: NotifyMessage) {
-        if (!message.canSendMessage()) return
-        val intent = Intent(this, MainActivity::class.java).apply {
-            putExtra(MainActivity.EXTRA_CONTINUE_MESSAGE_ID, message.id)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        }
-        runCatching { startActivity(intent) }
-            .onFailure { Log.w(tag, "continue action launch failed", it) }
     }
 
     /**
@@ -825,7 +823,7 @@ class WebSocketService : LifecycleService() {
         MessageRepository.setConnectionStatus(
             if (reconnectAttempt == 0) ConnectionStatus.Connecting else ConnectionStatus.Reconnecting
         )
-        updateForeground("\u8fde\u63a5\u4e2d$candidateInfo\uff1a$host")
+        updateForeground("\u8fde\u63a5\u4e2d$candidateInfo\uff1a$host", host)
 
         Log.i(tag, "connect generation=$generation host=$host relayConfig=$relayConfig")
 
@@ -844,7 +842,7 @@ class WebSocketService : LifecycleService() {
         } catch (error: IllegalArgumentException) {
             Log.e(tag, "invalid ws url=$wsUrl, host=$host", error)
             MessageRepository.setConnectionStatus(ConnectionStatus.Disconnected)
-            updateForeground("\u8fde\u63a5\u5730\u5740\u65e0\u6548\uff1a$host")
+            updateForeground("\u8fde\u63a5\u5730\u5740\u65e0\u6548\uff1a$host", host)
             socket = null
             scheduleReconnect()
             return
@@ -875,7 +873,7 @@ class WebSocketService : LifecycleService() {
                     updateForeground("\u4e2d\u7ee7\u8fde\u63a5\u4e2d\uff0c\u623f\u95f4 ${rc.roomId} \u914d\u5bf9\u4e2d\u2026")
                     startConnectionWatchdog()
                 } else {
-                    updateForeground("\u5df2\u5efa\u7acb\u8fde\u63a5\uff0c\u7b49\u5f85\u5fc3\u8df3\u786e\u8ba4\uff1a$host")
+                    updateForeground("\u5df2\u5efa\u7acb\u8fde\u63a5\uff0c\u7b49\u5f85\u5fc3\u8df3\u786e\u8ba4\uff1a$host", host)
                     startConnectionWatchdog()
                     sendHeartbeat(webSocket, now)
                     flushPendingApprovalControls(webSocket)
@@ -1033,13 +1031,25 @@ class WebSocketService : LifecycleService() {
     }
 
     private fun markSocketVerified(host: String, reason: String) {
+        val previousHost = connectedHost
         connectedHost = host
-        if (MessageRepository.state.value.connectionStatus == ConnectionStatus.Connected) return
+        val wasConnected = MessageRepository.state.value.connectionStatus == ConnectionStatus.Connected
+
+        // 历史地址记录一次「本次连接用到了哪个地址」。
+        // 必须放在下面的早退判断之前，否则「已连接状态下切到历史里的另一个地址」不会刷新使用时间，
+        // 新地址也就不会冒到列表顶部。
+        // 同时必须挡住心跳 ack：心跳会高频进入本函数，host 未变且已处于已连接态时不再重复记录，
+        // 否则每个心跳都会写一次 SharedPreferences。
+        if (!(wasConnected && previousHost == host)) {
+            MessageRepository.recordHostUsage(host)
+        }
+
+        if (wasConnected) return
 
         reconnectAttempt = 0
         MessageRepository.setConnectionStatus(ConnectionStatus.Connected)
         MessageRepository.rememberSuccessfulHost(host)
-        updateForeground("\u5df2\u8fde\u63a5\uff1a$host")
+        updateForeground("\u5df2\u8fde\u63a5\uff1a$host", host)
         Log.i(tag, "connection verified reason=$reason host=$host")
     }
 
@@ -1224,25 +1234,16 @@ class WebSocketService : LifecycleService() {
         webSocket: WebSocket,
         agentKey: String,
         method: String,
-        sessionId: String,
-        text: String = "",
-        messageId: String = ""
+        sessionId: String
     ): Boolean {
         val body = JSONObject()
             .put("type", TYPE_AGENT_CALL)
             .put("agentKey", agentKey)
             .put("method", method)
             .put("sessionId", sessionId)
-        if (text.isNotBlank()) {
-            body.put("text", text)
-        }
-        if (messageId.isNotBlank()) {
-            body.put("messageId", messageId)
-        }
         Log.i(
             tag,
-            "send agent.call agentKey=$agentKey method=$method " +
-                "sessionId=$sessionId messageId=$messageId textLength=${text.length}"
+            "send agent.call agentKey=$agentKey method=$method sessionId=$sessionId"
         )
         val ok = webSocket.send(body.toString())
         lastSendTimeMs = System.currentTimeMillis()
@@ -1360,7 +1361,7 @@ class WebSocketService : LifecycleService() {
     private fun flushPendingAgentCalls(webSocket: WebSocket) {
         while (true) {
             val call = pendingAgentCall.getAndSet(null) ?: return
-            if (!sendAgentCall(webSocket, call.agentKey, call.method, call.sessionId, call.text, call.messageId)) {
+            if (!sendAgentCall(webSocket, call.agentKey, call.method, call.sessionId)) {
                 // If a newer call arrived while this send was in flight, preserve it.
                 pendingAgentCall.compareAndSet(null, call)
                 return
@@ -1460,7 +1461,31 @@ class WebSocketService : LifecycleService() {
         return generation == socketGeneration && socket === webSocket
     }
 
-    private fun updateForeground(content: String) {
+    /**
+     * 更新前台通知。
+     *
+     * [host] 传本次文案里出现的连接地址（没有地址的文案传 null），
+     * 由 [postForeground] 按「隐藏地址」开关决定是否脱敏。
+     */
+    private fun updateForeground(content: String, host: String? = null) {
+        lastForegroundContent = content
+        lastForegroundHost = host
+        postForeground()
+    }
+
+    /**
+     * 真正下发前台通知。
+     *
+     * 脱敏必须在**这里**做，而不是在调用处拼文案时：调用处拿不到最新开关，
+     * 且开关变化后要重发（见 `onCreate` 里对 `hostMasked` 的收集）。
+     * 锁屏通知比应用界面更显眼，「隐藏地址」开着却把 IP 留在锁屏上等于没隐藏。
+     */
+    private fun postForeground() {
+        val content = if (MessageRepository.hostMasked.value) {
+            maskHostInText(lastForegroundContent, lastForegroundHost)
+        } else {
+            lastForegroundContent
+        }
         val notification = NotificationHelper.createServiceNotification(this, content)
         NotificationHelper.notifyService(this, notification)
     }
@@ -1504,8 +1529,6 @@ class WebSocketService : LifecycleService() {
         const val EXTRA_AGENT_KEY = "extra_agent_key"
         const val EXTRA_AGENT_METHOD = "extra_agent_method"
         const val EXTRA_AGENT_SESSION_ID = "extra_agent_session_id"
-        const val EXTRA_AGENT_TEXT = "extra_agent_text"
-        const val EXTRA_AGENT_MESSAGE_ID = "extra_agent_message_id"
         const val PC_POWER_SLEEP = "sleep"
         /** Legacy command accepted for upgrades from versions that only turned off the display. */
         const val PC_POWER_SCREEN_OFF = "screen_off"
@@ -1517,6 +1540,7 @@ class WebSocketService : LifecycleService() {
         private const val TYPE_CONTROL = "control"
         private const val TYPE_AGENT_CALL = "agent.call"
         private const val TYPE_AGENT_PROBE = "agent.probe"
+        private const val METHOD_SESSION_STOP = "session.stop"
         private const val ACTION_APPROVAL_RESOLVE = "approval.resolve"
         private const val HEARTBEAT_INTERVAL_MS = 20_000L
         private const val HEARTBEAT_TIMEOUT_MS = 60_000L
@@ -1534,25 +1558,13 @@ class WebSocketService : LifecycleService() {
         private const val AGENT_RESULT_TOAST_MS = 3_000L
 
         fun requestAgentStop(context: Context, message: NotifyMessage): Boolean {
-            return enqueueAgentCall(context, message, "session.stop", "")
-        }
-
-        /**
-         * 在手机上给 agent 会话发送下一条指令（session.send）——
-         * 即“手机上继续 vibe coding”的入口。text 会经 PC 的
-         * AgentApiProxy 注入对应会话（Claude/Codex 续接、Freebuff 入队）。
-         */
-        fun requestAgentSend(context: Context, message: NotifyMessage, text: String): Boolean {
-            val trimmed = text.trim()
-            if (trimmed.isEmpty()) return false
-            return enqueueAgentCall(context, message, "session.send", trimmed)
+            return enqueueAgentCall(context, message, METHOD_SESSION_STOP)
         }
 
         private fun enqueueAgentCall(
             context: Context,
             message: NotifyMessage,
-            method: String,
-            text: String
+            method: String
         ): Boolean {
             val agentKey = canonicalSourceKey(message.source).trim().lowercase()
             val sessionId = message.sessionId.trim()
@@ -1563,10 +1575,6 @@ class WebSocketService : LifecycleService() {
                 .putExtra(EXTRA_AGENT_KEY, agentKey)
                 .putExtra(EXTRA_AGENT_METHOD, method)
                 .putExtra(EXTRA_AGENT_SESSION_ID, sessionId)
-                .putExtra(EXTRA_AGENT_MESSAGE_ID, message.id)
-            if (text.isNotBlank()) {
-                intent.putExtra(EXTRA_AGENT_TEXT, text)
-            }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 ContextCompat.startForegroundService(context, intent)
@@ -1589,8 +1597,6 @@ class WebSocketService : LifecycleService() {
     private data class AgentCall(
         val agentKey: String,
         val method: String,
-        val sessionId: String,
-        val text: String = "",
-        val messageId: String = ""
+        val sessionId: String
     )
 }

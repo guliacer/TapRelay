@@ -58,7 +58,6 @@ class TransientTaskHeadsUpController(private val context: Context) :
     private var onDismiss: ((NotifyMessage) -> Unit)? = null
     private var onResolveApproval: ((NotifyMessage, String) -> Unit)? = null
     private var onProcessWaiting: ((NotifyMessage) -> Unit)? = null
-    private var onContinue: ((NotifyMessage) -> Unit)? = null
     private var onAutoDismiss: (() -> Unit)? = null
     private val autoDismissRunnable = Runnable {
         hide()
@@ -77,8 +76,7 @@ class TransientTaskHeadsUpController(private val context: Context) :
         onDismiss: (NotifyMessage) -> Unit,
         onAutoDismiss: () -> Unit,
         onResolveApproval: ((NotifyMessage, String) -> Unit)? = null,
-        onProcessWaiting: ((NotifyMessage) -> Unit)? = null,
-        onContinue: ((NotifyMessage) -> Unit)? = null
+        onProcessWaiting: ((NotifyMessage) -> Unit)? = null
     ): Boolean {
         checkMainThread("show")
         if (!Settings.canDrawOverlays(context)) return false
@@ -88,7 +86,6 @@ class TransientTaskHeadsUpController(private val context: Context) :
         this.onDismiss = onDismiss
         this.onResolveApproval = onResolveApproval
         this.onProcessWaiting = onProcessWaiting
-        this.onContinue = onContinue
         this.onAutoDismiss = onAutoDismiss
 
         if (composeView == null) {
@@ -133,8 +130,7 @@ class TransientTaskHeadsUpController(private val context: Context) :
                         registeredApps = registeredApps.value,
                         onDismiss = { dismissCurrent(message) },
                         onResolveApproval = onResolveApproval,
-                        onProcessWaiting = onProcessWaiting,
-                        onContinue = onContinue
+                        onProcessWaiting = onProcessWaiting
                     )
                 }
             }

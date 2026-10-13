@@ -2,8 +2,10 @@ package com.lan.notify.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
@@ -21,7 +23,8 @@ fun ChannelIcon(
         painter = painterResource(channelIconRes(channel)),
         contentDescription = contentDescription,
         contentScale = ContentScale.Fit,
-        modifier = modifier
+        // Keep every source icon circular even when a legacy/custom asset has a square canvas.
+        modifier = modifier.clip(CircleShape)
     )
 }
 
@@ -39,6 +42,7 @@ fun channelIconRes(channel: Channel): Int = when (channel) {
     Channel.QuarkNetdisk -> R.drawable.ic_quarknetdisk_logo
     Channel.Adrive -> R.drawable.ic_adrive_logo
     Channel.WorkBuddy -> R.drawable.ic_workbuddy_logo
+    Channel.WorkBuddyAi -> R.drawable.ic_workbuddy_ai_logo
     Channel.ComfyUI -> R.drawable.ic_comfyui_logo
     Channel.Opencode -> R.drawable.ic_opencode_logo
     Channel.DeepseekHarness -> R.drawable.ic_deepseekharness_logo

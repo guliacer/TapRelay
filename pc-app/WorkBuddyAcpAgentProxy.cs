@@ -24,8 +24,7 @@ namespace TapRelay
     {
         private static readonly HashSet<string> Caps = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "agent.probe",
-            "session.send"
+            "agent.probe"
         };
 
         private static readonly HashSet<string> SupportedPermissionModes =
@@ -46,6 +45,7 @@ namespace TapRelay
         private const string QueueFlushItemId = "__taprelay_queue_flush__";
 
         private readonly Action<string> _log;
+        private readonly Action<string> _detailLog;
         private readonly ConcurrentDictionary<string, SemaphoreSlim> _sessionGates =
             new ConcurrentDictionary<string, SemaphoreSlim>(StringComparer.OrdinalIgnoreCase);
         private string? _resolvedBinary;
@@ -54,9 +54,11 @@ namespace TapRelay
         public string AgentKey => "workbuddy";
         public HashSet<string> Capabilities => Caps;
 
-        public WorkBuddyAcpAgentProxy(Action<string> log)
+        public WorkBuddyAcpAgentProxy(Action<string> log, Action<string>? detailLog = null)
         {
             _log = log ?? throw new ArgumentNullException(nameof(log));
+            // 可执行文件探测细节只写诊断文件，首页只保留用户可读的告警。
+            _detailLog = detailLog ?? log;
         }
 
         public Task<AgentProbeResult> ProbeAsync(CancellationToken cancellationToken)
@@ -104,13 +106,13 @@ namespace TapRelay
             CancellationToken cancellationToken)
         {
 
-            var binary = ResolveBinary();
+            var binary = ResolveBinary(sessionId);
             if (binary == null)
             {
                 return AgentApiResult.Failure("NOT_INSTALLED", "WorkBuddy 未安装");
             }
 
-            if (!IsProcessRunning())
+            if (!IsProcessRunning(sessionId))
             {
                 try
                 {
@@ -694,14 +696,11 @@ namespace TapRelay
                 return cwd.Trim();
             }
 
-            var configDir = Environment.GetEnvironmentVariable("WORKBUDDY_CONFIG_DIR");
-            if (string.IsNullOrWhiteSpace(configDir))
-            {
-                configDir = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    ".workbuddy");
-            }
-
+            // WorkBuddyAI (国际版) uses ~/.workbuddy-ai while the domestic
+            // WorkBuddy (国内版) uses ~/.workbuddy. Pick the directory that
+            // actually owns this session so an international session is resumed
+            // against its own ACP registry.
+            var configDir = ResolveConfigDir(sessionId);
             var sessionDir = Path.Combine(configDir, "sessions");
             if (!Directory.Exists(sessionDir))
             {
@@ -872,14 +871,11 @@ namespace TapRelay
         {
             var registeredCandidates = new List<(string SessionId, string Endpoint)>();
             var activeEndpoints = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var configDir = Environment.GetEnvironmentVariable("WORKBUDDY_CONFIG_DIR");
-            if (string.IsNullOrWhiteSpace(configDir))
-            {
-                configDir = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    ".workbuddy");
-            }
-
+            // Resolve the config directory that owns this session. The domestic
+            // WorkBuddy (~/.workbuddy) and international WorkBuddyAI (~/.workbuddy-ai)
+            // keep separate ACP session registries, so the endpoint for this
+            // session must be read from the matching directory.
+            var configDir = ResolveConfigDir(sessionId);
             var sessionDir = Path.Combine(configDir, "sessions");
             if (Directory.Exists(sessionDir))
             {
@@ -995,11 +991,85 @@ namespace TapRelay
             return true;
         }
 
-        private bool IsProcessRunning()
+        private static bool IsInternationalConfigDir(string configDir)
+        {
+            // The international WorkBuddyAI keeps its per-user data under
+            // ~/.workbuddy-ai, while the domestic WorkBuddy uses ~/.workbuddy.
+            return Path.GetFileName(configDir)
+                .Equals(".workbuddy-ai", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string ResolveConfigDir(string sessionId)
+        {
+            // An explicit WORKBUDDY_CONFIG_DIR override always wins, regardless
+            // of which version spawned the process that set it.
+            var overrideDir = Environment.GetEnvironmentVariable("WORKBUDDY_CONFIG_DIR");
+            if (!string.IsNullOrWhiteSpace(overrideDir))
+            {
+                return overrideDir!;
+            }
+
+            // Otherwise pick the config directory that actually owns this
+            // session. The domestic WorkBuddy keeps its registry under
+            // ~/.workbuddy and the international WorkBuddyAI under
+            // ~/.workbuddy-ai; each registers its ACP sessions there.
+            var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var candidateDirs = new[]
+            {
+                Path.Combine(profile, ".workbuddy"),
+                Path.Combine(profile, ".workbuddy-ai")
+            };
+
+            foreach (var dir in candidateDirs)
+            {
+                var sessionDir = Path.Combine(dir, "sessions");
+                if (!Directory.Exists(sessionDir)) continue;
+                foreach (var file in Directory.EnumerateFiles(sessionDir, "*.json"))
+                {
+                    try
+                    {
+                        using var document = JsonDocument.Parse(File.ReadAllText(file));
+                        var root = document.RootElement;
+                        var id = root.TryGetProperty("sessionId", out var sessionElement) &&
+                                 sessionElement.ValueKind == JsonValueKind.String
+                            ? sessionElement.GetString() ?? string.Empty
+                            : string.Empty;
+                        if (string.Equals(id, sessionId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return dir;
+                        }
+                    }
+                    catch
+                    {
+                        // Session registry files can be written concurrently.
+                    }
+                }
+            }
+
+            // Fall back to the domestic default to preserve the original
+            // behavior when the session registry cannot identify a directory.
+            return Path.Combine(profile, ".workbuddy");
+        }
+
+        private bool IsProcessRunning(string? sessionId = null)
         {
             try
             {
-                return Process.GetProcessesByName("WorkBuddy").Any();
+                if (sessionId != null)
+                {
+                    // When resuming a specific session, only the version that
+                    // owns it counts. The domestic WorkBuddy runs as "WorkBuddy"
+                    // and the international WorkBuddyAI as "WorkBuddyAI".
+                    var configDir = ResolveConfigDir(sessionId);
+                    var processName = IsInternationalConfigDir(configDir)
+                        ? "WorkBuddyAI"
+                        : "WorkBuddy";
+                    return Process.GetProcessesByName(processName).Any();
+                }
+
+                // Probe without a session: either version running is enough.
+                return Process.GetProcessesByName("WorkBuddy").Any() ||
+                       Process.GetProcessesByName("WorkBuddyAI").Any();
             }
             catch
             {
@@ -1007,28 +1077,74 @@ namespace TapRelay
             }
         }
 
-        private string? ResolveBinary()
+        private string? ResolveBinary(string? sessionId = null)
         {
-            if (_binaryProbed) return _resolvedBinary;
-            _binaryProbed = true;
-
-            var candidates = new[]
+            if (sessionId == null)
             {
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "WorkBuddy", "WorkBuddy.exe"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "WorkBuddy", "WorkBuddy.exe")
-            };
-            foreach (var candidate in candidates)
-            {
-                if (File.Exists(candidate))
-                {
-                    _resolvedBinary = candidate;
-                    _log("workbuddy binary resolved: " + candidate);
-                    return candidate;
-                }
+                if (_binaryProbed) return _resolvedBinary;
+                _binaryProbed = true;
+                _resolvedBinary = ResolveBinaryFromCandidates(BuildBinaryCandidates(null));
+                if (_resolvedBinary == null) _detailLog("workbuddy binary not found");
+                else _detailLog("workbuddy binary resolved: " + _resolvedBinary);
+                return _resolvedBinary;
             }
 
-            _log("workbuddy binary not found");
+            // Session-specific launch: resolve the binary for the version that
+            // owns this session so an international session is resumed by
+            // WorkBuddyAI rather than the domestic WorkBuddy.
+            var binary = ResolveBinaryFromCandidates(BuildBinaryCandidates(sessionId));
+            if (binary != null) _detailLog("workbuddy binary resolved for session=" + sessionId + ": " + binary);
+            else _detailLog("workbuddy binary not found for session=" + sessionId);
+            return binary;
+        }
+
+        private static string? ResolveBinaryFromCandidates(IEnumerable<string> candidates)
+        {
+            foreach (var candidate in candidates)
+            {
+                if (File.Exists(candidate)) return candidate;
+            }
+
             return null;
+        }
+
+        private static IEnumerable<string> BuildBinaryCandidates(string? sessionId)
+        {
+            var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+            var programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+            var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+            // Domestic WorkBuddy (国内版) install locations.
+            string[] domestic =
+            {
+                Path.Combine(programFiles, "WorkBuddy", "WorkBuddy.exe"),
+                Path.Combine(localAppData, "Programs", "WorkBuddy", "WorkBuddy.exe")
+            };
+            // International WorkBuddyAI (国际版) install locations. It can be
+            // installed on any drive, commonly under Program Files (x86).
+            string[] international =
+            {
+                Path.Combine(programFilesX86, "WorkBuddyAI", "WorkBuddyAI.exe"),
+                Path.Combine(programFiles, "WorkBuddyAI", "WorkBuddyAI.exe"),
+                Path.Combine(localAppData, "Programs", "WorkBuddyAI", "WorkBuddyAI.exe")
+            };
+
+            if (sessionId == null)
+            {
+                // Probe without a session: either install satisfies "installed".
+                // Domestic first keeps the original default ordering.
+                foreach (var path in domestic) yield return path;
+                foreach (var path in international) yield return path;
+                yield break;
+            }
+
+            // Session-specific launch: prefer the binary for the owning version,
+            // then fall back to the other version if it is missing.
+            var configDir = ResolveConfigDir(sessionId);
+            var preferred = IsInternationalConfigDir(configDir) ? international : domestic;
+            var fallback = IsInternationalConfigDir(configDir) ? domestic : international;
+            foreach (var path in preferred) yield return path;
+            foreach (var path in fallback) yield return path;
         }
 
         private sealed class AcpConnection

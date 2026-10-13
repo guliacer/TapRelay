@@ -29,7 +29,6 @@ import com.lan.notify.data.NotifyMessage
 import com.lan.notify.data.OverlayPhase
 import com.lan.notify.data.RegisteredApp
 import com.lan.notify.data.TapRelayOverlayState
-import com.lan.notify.data.events
 import com.lan.notify.data.phase
 import com.lan.notify.ui.TapRelayOverlay
 import com.lan.notify.ui.theme.NotifyTheme
@@ -66,10 +65,6 @@ class TapRelayOverlayController(private val context: Context) :
     private var onDismissAll: (() -> Unit)? = null
     private var onResolveApproval: ((NotifyMessage, String) -> Unit)? = null
     private var onProcessWaiting: ((NotifyMessage) -> Unit)? = null
-    private var onContinue: ((NotifyMessage) -> Unit)? = null
-
-    /** 上次展示的卡片数量，用于仅在新增卡片时响铃。 */
-    private var lastShownCount = 0
 
     init {
         savedStateController.performAttach()
@@ -91,7 +86,6 @@ class TapRelayOverlayController(private val context: Context) :
         onDismissAll: () -> Unit,
         onResolveApproval: ((NotifyMessage, String) -> Unit)? = null,
         onProcessWaiting: ((NotifyMessage) -> Unit)? = null,
-        onContinue: ((NotifyMessage) -> Unit)? = null,
         debugEnabled: Boolean = false,
         dynamicEffectsEnabled: Boolean = true
     ): Boolean {
@@ -103,15 +97,10 @@ class TapRelayOverlayController(private val context: Context) :
         this.onDismissAll = onDismissAll
         this.onResolveApproval = onResolveApproval
         this.onProcessWaiting = onProcessWaiting
-        this.onContinue = onContinue
         this.registeredApps.value = registeredApps
         this.debugEnabled.value = debugEnabled
         this.dynamicEffectsEnabled.value = dynamicEffectsEnabled
         this.screenGeometry.value = CutoutGeometryProvider.read(context)
-
-        val newCount = state.events().size.coerceAtMost(OVERLAY_CARD_LIMIT)
-        val isNewCardArrived = newCount > lastShownCount
-        lastShownCount = newCount
 
         val phase = state.phase()
         if (phase == OverlayPhase.Hidden) {
@@ -126,9 +115,9 @@ class TapRelayOverlayController(private val context: Context) :
         } else {
             refreshWindowLayout()
         }
-        if (isNewCardArrived && composeView != null) {
-            playNotificationSound()
-        }
+        // 声音统一由通知路径负责（islandShown 时 postFullScreenAlert 的渠道为
+        // IMPORTANCE_HIGH 自带响铃）。悬浮岛自身不播音，避免与系统通知前后两次
+        // 响铃被误认为两条消息（2026-09-24 用户反馈）。
         return composeView != null
     }
 
@@ -142,7 +131,6 @@ class TapRelayOverlayController(private val context: Context) :
             lifecycleRegistry.currentState = Lifecycle.State.CREATED
         }
         composeView = null
-        lastShownCount = 0
     }
 
     fun destroy() {
@@ -170,7 +158,6 @@ class TapRelayOverlayController(private val context: Context) :
                         onDismissAll = { onDismissAll?.invoke() },
                         onResolveApproval = { message, decision -> onResolveApproval?.invoke(message, decision) },
                         onProcessWaiting = { message -> onProcessWaiting?.invoke(message) },
-                        onContinue = { message -> onContinue?.invoke(message) },
                         debugEnabled = debugEnabled.value,
                         dynamicEffectsEnabled = dynamicEffectsEnabled.value,
                         screenGeometry = geometry
@@ -196,18 +183,6 @@ class TapRelayOverlayController(private val context: Context) :
             .onFailure { error ->
                 if (error !is IllegalArgumentException) throw error
             }
-    }
-
-    private fun playNotificationSound() {
-        val uri = android.media.RingtoneManager.getActualDefaultRingtoneUri(
-            context,
-            android.media.RingtoneManager.TYPE_NOTIFICATION
-        ) ?: return
-        runCatching {
-            android.media.RingtoneManager.getRingtone(context, uri)?.play()
-        }.onFailure { error ->
-            Log.w(TAG, "failed to play notification sound", error)
-        }
     }
 
     private fun checkMainThread(action: String) {

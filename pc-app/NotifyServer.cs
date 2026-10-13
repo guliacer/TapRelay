@@ -43,6 +43,19 @@ namespace TapRelay
         private const string HeartbeatAckPayload = "{\"type\":\"heartbeat_ack\"}";
         private const int StopGracePeriodMilliseconds = 300;
 
+        // 停止流程的硬上限。通用主机的 StopAsync 并不完整遵守传入的 CancellationToken：
+        // 它在等待 ApplicationLifetime 的停止信号与托管服务停止时是"无超时"的。
+        // 实测（2026-10-12，本机）：手机客户端 0 个、监听端口约 667ms 就已释放，
+        // 但这个 await 永不返回 —— 诊断日志停在"开始停止服务"，
+        // 既没有"服务优雅停止超时"也没有"服务已停止"，进程滞留 130MB+ 不退。
+        // 用户看到的现象就是"软件退出了但端口还被占着"：占着端口的是那个没退干净的进程。
+        // 因此不再信任单个 CancellationToken，用 WhenAny 兜住上限，到点就强制释放。
+        private const int StopHardCeilingMilliseconds = 1000;
+
+        // host.Dispose() 会逐个释放 DI 单例，其中任何一个卡住都会把进程留在这里。
+        // 同样设上限：清理不完整无所谓，进程马上退出，资源由系统回收。
+        private const int HostDisposeCeilingMilliseconds = 400;
+
         private readonly ConcurrentDictionary<Guid, WebSocket> _clients = new ConcurrentDictionary<Guid, WebSocket>();
         private readonly ConditionalWeakTable<WebSocket, WebSocketSendChannel> _sendChannels =
             new ConditionalWeakTable<WebSocket, WebSocketSendChannel>();
@@ -99,6 +112,14 @@ namespace TapRelay
 
         public event Action<ServerSnapshot>? SnapshotChanged;
         public event Action<string>? LogLine;
+
+        /// <summary>
+        /// 只对诊断有价值的日志（协议回执、心跳确认等），不会进入首页活动摘要，
+        /// 仅写入诊断文件。原先这些内容靠上层按文案前缀过滤，一旦新增回执类型就会漏；
+        /// 改为在发出点决定通道，新增回执只要走 <see cref="LogDetail"/> 就不会污染首页。
+        /// </summary>
+        public event Action<string>? DetailLogLine;
+
         public event Action<IReadOnlyList<RegisteredAppDefinition>>? AppsChanged;
 
         /// <summary>
@@ -156,9 +177,7 @@ namespace TapRelay
                     Log("收到手机 agent.call：agentKey=" +
                         ReadOptionalString(doc.RootElement, "agentKey", 40) +
                         " method=" + ReadOptionalString(doc.RootElement, "method", 40) +
-                        " sessionId=" + ReadOptionalString(doc.RootElement, "sessionId", 160) +
-                        " messageId=" + ReadOptionalString(doc.RootElement, "messageId", 80) +
-                        " textLength=" + ReadOptionalString(doc.RootElement, "text", 4096).Length);
+                        " sessionId=" + ReadOptionalString(doc.RootElement, "sessionId", 160));
                     return await HandleAgentCallAsync(doc.RootElement, cancellationToken);
                 }
 
@@ -192,11 +211,15 @@ namespace TapRelay
                     // WorkBuddy 等待确认（批量删除/权限/问题确认）：requestId 形如
                     // workbuddy:<sessionId>。手机端「允许 / 拒绝」直接在此远程确认——
                     // 将 WorkBuddy 主窗口置前并发送 Enter（允许）/ Esc（拒绝）。
-                    if (requestId.StartsWith("workbuddy:", StringComparison.OrdinalIgnoreCase))
+                    if (requestId.StartsWith("workbuddy:", StringComparison.OrdinalIgnoreCase) ||
+                        requestId.StartsWith("workbuddy-ai:", StringComparison.OrdinalIgnoreCase))
                     {
-                        var sessionId = requestId.Substring("workbuddy:".Length).Trim();
-                        var resolved = ResolveWorkBuddyWaiting(sessionId, decision);
-                        Log("workbuddy approval resolved by remote client: session=" + sessionId +
+                        var isWorkBuddyAi = requestId.StartsWith("workbuddy-ai:", StringComparison.OrdinalIgnoreCase);
+                        var prefixLength = isWorkBuddyAi ? "workbuddy-ai:".Length : "workbuddy:".Length;
+                        var sessionId = requestId.Substring(prefixLength).Trim();
+                        var resolved = ResolveWorkBuddyWaiting(sessionId, decision, isWorkBuddyAi);
+                        Log((isWorkBuddyAi ? "workbuddy-ai" : "workbuddy") +
+                            " approval resolved by remote client: session=" + sessionId +
                             " decision=" + decision + " ok=" + resolved);
                         return new
                         {
@@ -425,36 +448,6 @@ namespace TapRelay
             return true;
         }
 
-        /// <summary>
-        /// 从 startPort 起向上探测空闲 TCP 端口（最多 maxAttempts 个），
-        /// 全部占用则返回 startPort（调用方按"未找到"处理）。
-        /// </summary>
-        internal static int FindAvailablePort(int startPort, int maxAttempts = 20)
-        {
-            for (var offset = 0; offset < maxAttempts; offset++)
-            {
-                var candidate = startPort + offset;
-                if (candidate > 65535)
-                {
-                    break;
-                }
-
-                try
-                {
-                    var listener = new TcpListener(IPAddress.Any, candidate);
-                    listener.Start();
-                    listener.Stop();
-                    return candidate;
-                }
-                catch (SocketException)
-                {
-                    // 端口被占用，继续探测下一个。
-                }
-            }
-
-            return startPort;
-        }
-
         public async Task StartAsync()
         {
             if (_host != null)
@@ -463,8 +456,33 @@ namespace TapRelay
             }
 
             _config = _config.Normalize();
+
+            // 铁律 R2（端口固定 1122）在配置入口强制：见 NetworkSettingsStore.PinPort。
+            // 服务本身只按给定配置监听 —— 把「固定端口」写在这里会让任何自定义端口的
+            // 调用方（含测试）静默连到 1122 上，既掩盖配置错误也会和运行中的实例互抢端口。
             var listenAddress = IPAddress.Parse(_config.ListenAddress);
             var listenPort = _config.ListenPort;
+
+            // 预检：端口是否被占用。占用则直接给出明确提示并启动失败，绝不漂移、不切换。
+            try
+            {
+                var probe = new TcpListener(listenAddress, listenPort);
+                probe.Start();
+                probe.Stop();
+            }
+            catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
+            {
+                throw new InvalidOperationException(
+                    "端口 " + listenPort + " 已被占用，无法启动 TapRelay 服务。请先关闭占用该端口的程序（常见为另一个 TapRelay 实例），再重新启动。",
+                    ex);
+            }
+            catch (SocketException ex)
+            {
+                throw new InvalidOperationException(
+                    "端口 " + listenPort + " 不可用（" + ex.SocketErrorCode + "），无法启动 TapRelay 服务。",
+                    ex);
+            }
+
             _host = Host.CreateDefaultBuilder()
                 .ConfigureLogging(logging => logging.ClearProviders())
                 .ConfigureWebHostDefaults(webBuilder =>
@@ -518,8 +536,22 @@ namespace TapRelay
                 // 用户主动停止时不等待 WebSocket close handshake。后台被冻结的手机
                 // 无法响应 CloseAsync，原先会先耗尽每个客户端的超时，再等待 Kestrel。
                 // Abort 会立刻取消服务端的 ReceiveAsync，让监听端口尽快释放。
+                //
+                // stopToken 只覆盖托管服务；通用主机在等 ApplicationLifetime 的停止
+                // 信号时完全不看它，所以真正兜底的是下面的 WhenAny 硬上限。
                 using var stopToken = new CancellationTokenSource(StopGracePeriodMilliseconds);
-                await host.StopAsync(stopToken.Token).ConfigureAwait(false);
+                var gracefulStop = host.StopAsync(stopToken.Token);
+                var winner = await Task.WhenAny(gracefulStop, Task.Delay(StopHardCeilingMilliseconds))
+                    .ConfigureAwait(false);
+                if (ReferenceEquals(winner, gracefulStop))
+                {
+                    // 正常路径：让异常照旧冒到下面的 catch，保持既有日志行为。
+                    await gracefulStop.ConfigureAwait(false);
+                }
+                else
+                {
+                    Log("服务优雅停止超过硬上限，直接强制释放（" + StopHardCeilingMilliseconds + "ms）");
+                }
             }
             catch (OperationCanceledException)
             {
@@ -533,7 +565,20 @@ namespace TapRelay
             {
                 try
                 {
-                    host.Dispose();
+                    // 放到线程池并设上限：Dispose 卡住时只泄漏一个线程，
+                    // 不能让它把整个退出流程拖在这里。
+                    var dispose = Task.Run(() => host.Dispose());
+                    var disposed = await Task.WhenAny(dispose, Task.Delay(HostDisposeCeilingMilliseconds))
+                        .ConfigureAwait(false);
+                    if (ReferenceEquals(disposed, dispose))
+                    {
+                        // 让 Dispose 自身的异常冒到下面的 catch，保持既有日志行为。
+                        await dispose.ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        Log("服务资源释放超过上限，放弃等待（" + HostDisposeCeilingMilliseconds + "ms）");
+                    }
                 }
                 catch (Exception error)
                 {
@@ -1363,7 +1408,7 @@ namespace TapRelay
                     if (agentResponse != null)
                     {
                         await SendJsonAsync(clientId, socket, agentResponse, cancellationToken);
-                        Log("手机 agent.call 回执已发送：client=" + clientId +
+                        LogDetail("手机 agent.call 回执已发送：client=" + clientId +
                             " messageId=" + ReadOptionalString(json.RootElement, "messageId", 80));
                     }
                     return;
@@ -1527,8 +1572,6 @@ namespace TapRelay
             var agentKey = ReadOptionalString(root, "agentKey", 40);
             var method = ReadOptionalString(root, "method", 40);
             var sessionId = ReadOptionalString(root, "sessionId", 160);
-            var text = ReadOptionalString(root, "text", 4096);
-            var cwd = ReadOptionalString(root, "cwd", 240);
 
             if (string.IsNullOrWhiteSpace(agentKey) || string.IsNullOrWhiteSpace(method))
             {
@@ -1562,11 +1605,7 @@ namespace TapRelay
             try
             {
                 AgentApiResult result;
-                if (string.Equals(method, "session.send", StringComparison.OrdinalIgnoreCase))
-                {
-                    result = await proxy.SendAsync(sessionId, text, cwd, cancellationToken);
-                }
-                else if (string.Equals(method, "session.stop", StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(method, "session.stop", StringComparison.OrdinalIgnoreCase))
                 {
                     result = await proxy.StopAsync(sessionId, cancellationToken);
                 }
@@ -1686,7 +1725,7 @@ namespace TapRelay
                 : body.GetType().GetProperty("type")?.GetValue(body)?.ToString() ?? string.Empty;
             if (await SendSocketAsync(clientId, socket, bytes, cancellationToken))
             {
-                Log("WebSocket response sent client=" + clientId +
+                LogDetail("WebSocket response sent client=" + clientId +
                     " type=" + responseType + " bytes=" + bytes.Length);
             }
         }
@@ -1872,9 +1911,15 @@ namespace TapRelay
 
         private static string ResolveNotificationTitle(string source, string status, string title)
         {
-            var displayName = "WorkBuddy";
-            if (string.Equals(source, "workbuddy", StringComparison.OrdinalIgnoreCase) &&
-                NotificationAppRegistry.TryGet("workbuddy", out var registered) &&
+            var appKey = string.Equals(source, "workbuddy-ai", StringComparison.OrdinalIgnoreCase)
+                ? "workbuddy-ai"
+                : "workbuddy";
+            var displayName = string.Equals(appKey, "workbuddy-ai", StringComparison.OrdinalIgnoreCase)
+                ? "WorkBuddy AI"
+                : "WorkBuddy";
+            if ((string.Equals(source, "workbuddy", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(source, "workbuddy-ai", StringComparison.OrdinalIgnoreCase)) &&
+                NotificationAppRegistry.TryGet(appKey, out var registered) &&
                 !string.IsNullOrWhiteSpace(registered.DisplayName))
             {
                 displayName = registered.DisplayName;
@@ -1988,7 +2033,7 @@ namespace TapRelay
         }
 
         /// <summary>
-        /// 会话 ID 用于手机端"继续"按钮续接会话；去空白并截断到 160 字符，
+        /// 会话 ID 用于任务关联和停止控制；去空白并截断到 160 字符，
         /// 与 TaskEvent.MaxSessionIdLength 一致。空字符串表示来源未提供。
         /// </summary>
         private static string NormalizeSessionId(string sessionId)
@@ -2087,7 +2132,7 @@ namespace TapRelay
         /// 发送 Enter（允许）或 Esc（拒绝）触发当前确认框。仅响应手机端
         /// 明确发来的 approval.resolve，不做任何未授权的界面操作。
         /// </summary>
-        private bool ResolveWorkBuddyWaiting(string sessionId, string decision)
+        private bool ResolveWorkBuddyWaiting(string sessionId, string decision, bool workBuddyAi = false)
         {
             if (string.IsNullOrWhiteSpace(sessionId))
             {
@@ -2096,18 +2141,24 @@ namespace TapRelay
 
             try
             {
-                foreach (var process in Process.GetProcessesByName("WorkBuddy"))
+                var processNames = workBuddyAi
+                    ? new[] { "WorkBuddyAI" }
+                    : new[] { "WorkBuddy" };
+                foreach (var processName in processNames)
                 {
-                    if (process.MainWindowHandle == IntPtr.Zero)
+                    foreach (var process in Process.GetProcessesByName(processName))
                     {
-                        continue;
-                    }
+                        if (process.MainWindowHandle == IntPtr.Zero)
+                        {
+                            continue;
+                        }
 
-                    SetForegroundWindow(process.MainWindowHandle);
-                    Thread.Sleep(350);
-                    // 允许 → Enter 触发确认框默认按钮；拒绝 → Esc 取消。
-                    SendKeys.SendWait(decision == "allow" ? "{ENTER}" : "{ESC}");
-                    return true;
+                        SetForegroundWindow(process.MainWindowHandle);
+                        Thread.Sleep(350);
+                        // 允许 → Enter 触发确认框默认按钮；拒绝 → Esc 取消。
+                        SendKeys.SendWait(decision == "allow" ? "{ENTER}" : "{ESC}");
+                        return true;
+                    }
                 }
             }
             catch (Exception error)
@@ -2387,6 +2438,16 @@ namespace TapRelay
             LogLine?.Invoke(text);
         }
 
+        /// <summary>
+        /// 诊断级日志：同样写入诊断文件，但不进入首页活动摘要。
+        /// 判断标准是「这条日志对用户是否构成一个可读的事件」，而不是内容匹配——
+        /// 底层回执、协议帧、二进制探测这类内容属于实现细节，用户看到只会淹没真事件。
+        /// </summary>
+        private void LogDetail(string text)
+        {
+            DetailLogLine?.Invoke(text);
+        }
+
         private sealed class MessagePayload
         {
             public string type { get; set; } = "message";
@@ -2406,7 +2467,7 @@ namespace TapRelay
             public string actionUrl { get; set; } = string.Empty;
             /// <summary>
             /// 会话 ID（Claude transcript 文件名 / Codex session / ZCode 会话），
-            /// 手机端"继续"按钮据此调用 PC 续接会话；空字符串表示该来源不支持续接。
+            /// 用于任务关联、停止控制和来源适配；空字符串表示没有可关联的会话。
             /// </summary>
             public string sessionId { get; set; } = string.Empty;
             /// <summary>任务日志正文（如 ComfyUI K 采样器正向提示词）；空串表示未解析出细化日志，手机端回退到 content。</summary>

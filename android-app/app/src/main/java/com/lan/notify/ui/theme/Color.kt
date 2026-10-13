@@ -165,6 +165,8 @@ object AppTokens {
     val ChannelAdrive = Color(0xFF1677FF)
     /** WorkBuddy brand violet. */
     val ChannelWorkBuddy = Color(0xFF6351F1)
+    /** WorkBuddy AI 独立版本的绿色品牌色。 */
+    val ChannelWorkBuddyAi = Color(0xFF10C6A6)
     /** ComfyUI 官方品牌撞色：深紫底上的霓虹黄（取自官方 logo 的 #F2FF59）。 */
     val ChannelComfyUI = Color(0xFFF2FF59)
     /** OpenCode 官方浅灰白品牌色（取自官方 logo 的 #F4F4F5）。 */

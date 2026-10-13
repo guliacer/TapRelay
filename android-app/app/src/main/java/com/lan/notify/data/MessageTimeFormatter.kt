@@ -42,4 +42,28 @@ object MessageTimeFormatter {
             else -> format(rawTime)
         }
     }
+
+    /**
+     * 历史地址列表的「最近使用」文案。
+     *
+     * `lastUsedAtMillis <= 0` 表示真实使用时间不可知（老用户升级时由既有 server_host 播种），
+     * 明确渲染成「较早使用」，不谎报「刚刚使用」。
+     */
+    fun formatHostUsedAt(
+        lastUsedAtMillis: Long,
+        nowMillis: Long = System.currentTimeMillis()
+    ): String {
+        if (lastUsedAtMillis <= 0L) return "较早使用"
+        val elapsed = (nowMillis - lastUsedAtMillis).coerceAtLeast(0L)
+        val minute = 60_000L
+        val hour = 60L * minute
+        val day = 24L * hour
+        return when {
+            elapsed < minute -> "刚刚使用"
+            elapsed < hour -> "${elapsed / minute} 分钟前"
+            elapsed < day -> "${elapsed / hour} 小时前"
+            elapsed < 2 * day -> "昨天"
+            else -> "${elapsed / day} 天前"
+        }
+    }
 }

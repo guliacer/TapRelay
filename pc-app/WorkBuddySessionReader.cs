@@ -39,7 +39,7 @@ namespace TapRelay
                 return false;
             }
 
-            var database = ResolveDatabase();
+            var database = ResolveDatabase(sessionId);
             if (database.Length == 0)
             {
                 return false;
@@ -96,7 +96,7 @@ namespace TapRelay
                 return false;
             }
 
-            var database = ResolveDatabase();
+            var database = ResolveDatabase(sessionId);
             if (database.Length == 0)
             {
                 return false;
@@ -153,7 +153,7 @@ namespace TapRelay
                 return false;
             }
 
-            var database = ResolveDatabase();
+            var database = ResolveDatabase(sessionId);
             if (database.Length == 0)
             {
                 return false;
@@ -212,7 +212,7 @@ namespace TapRelay
                 return false;
             }
 
-            var database = ResolveDatabase();
+            var database = ResolveDatabase(sessionId);
             if (database.Length == 0)
             {
                 return false;
@@ -293,7 +293,7 @@ namespace TapRelay
                 return false;
             }
 
-            var database = ResolveDatabase();
+            var database = ResolveDatabase(sessionId);
             if (database.Length == 0)
             {
                 return false;
@@ -451,20 +451,18 @@ namespace TapRelay
 
         private static string ResolveSessionFile(string sessionId)
         {
-            var projects = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                ".workbuddy", "projects");
-            if (!Directory.Exists(projects))
+            foreach (var dir in GetConfigDirs())
             {
-                return string.Empty;
-            }
+                var projects = Path.Combine(dir, "projects");
+                if (!Directory.Exists(projects)) continue;
 
-            foreach (var directory in Directory.EnumerateDirectories(projects))
-            {
-                var candidate = Path.Combine(directory, sessionId + ".jsonl");
-                if (File.Exists(candidate))
+                foreach (var directory in Directory.EnumerateDirectories(projects))
                 {
-                    return candidate;
+                    var candidate = Path.Combine(directory, sessionId + ".jsonl");
+                    if (File.Exists(candidate))
+                    {
+                        return candidate;
+                    }
                 }
             }
 
@@ -557,7 +555,31 @@ namespace TapRelay
             return separator >= 0 ? normalized.Substring(separator + 1) : normalized;
         }
 
-        private static string ResolveDatabase()
+        /// <summary>
+        /// 候选配置目录：WORKBUDDY_CONFIG_DIR 覆盖（若存在）→ 国内版 ~/.workbuddy
+        /// → 国际版 ~/.workbuddy-ai。国际版 WorkBuddyAI 与国内版 WorkBuddy 共用
+        /// workbuddy 键，但各自有独立 workbuddy.db / projects，须按会话归属选择。
+        /// </summary>
+        private static IEnumerable<string> GetConfigDirs()
+        {
+            var dirs = new List<string>();
+            var env = Environment.GetEnvironmentVariable("WORKBUDDY_CONFIG_DIR");
+            if (!string.IsNullOrWhiteSpace(env))
+            {
+                dirs.Add(Path.GetFullPath(env.Trim()));
+            }
+
+            var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            dirs.Add(Path.Combine(profile, ".workbuddy"));
+            dirs.Add(Path.Combine(profile, ".workbuddy-ai"));
+            return dirs;
+        }
+
+        /// <summary>
+        /// 按会话所属版本解析 workbuddy.db：依次在各候选目录下探测该 sessionId
+        /// 是否存在，命中即返回其库；均不命中则回退国内版默认库（保持原行为）。
+        /// </summary>
+        private static string ResolveDatabase(string sessionId)
         {
             var database = DatabaseOverride;
             if (!string.IsNullOrWhiteSpace(database) && File.Exists(database))
@@ -565,10 +587,42 @@ namespace TapRelay
                 return database;
             }
 
-            database = Path.Combine(
+            foreach (var dir in GetConfigDirs())
+            {
+                var db = Path.Combine(dir, "workbuddy.db");
+                if (!File.Exists(db)) continue;
+                try
+                {
+                    using var connection = new SqliteConnection(
+                        "Data Source=" + db + ConnectionOptions);
+                    connection.Open();
+                    using var command = connection.CreateCommand();
+                    command.CommandText = "SELECT 1 FROM sessions WHERE id = @id LIMIT 1";
+                    var parameter = command.CreateParameter();
+                    parameter.ParameterName = "@id";
+                    parameter.Value = sessionId;
+                    command.Parameters.Add(parameter);
+                    using var reader = command.ExecuteReader();
+                    if (reader.Read())
+                    {
+                        return db;
+                    }
+                }
+                catch (SqliteException)
+                {
+                }
+                catch (IOException)
+                {
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+            }
+
+            var fallback = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                 ".workbuddy", "workbuddy.db");
-            return File.Exists(database) ? database : string.Empty;
+            return File.Exists(fallback) ? fallback : string.Empty;
         }
     }
 }

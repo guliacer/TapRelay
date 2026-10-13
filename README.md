@@ -10,6 +10,25 @@
 
 </div>
 
+## 项目概览
+
+<div align="center">
+<table>
+  <tr>
+    <td align="center" valign="top">
+      <img src="./assets/readme/pc-overview.png" alt="TapRelay PC 主界面，展示服务状态、通知应用和运行日志" width="560" />
+      <br />
+      <sub>PC 端：管理通知服务、应用适配和任务运行日志</sub>
+    </td>
+    <td align="center" valign="top">
+      <img src="./assets/readme/android-device-management.jpg" alt="TapRelay Android 设备管理界面，展示设备名称和连接状态" width="280" />
+      <br />
+      <sub>Android 端：配置设备并接收 PC 任务通知</sub>
+    </td>
+  </tr>
+</table>
+</div>
+
 TapRelay 是一套本地优先的任务通知中继：Windows PC 上的 AI Agent、桌面工具或脚本将完成、失败、等待处理等事件发送给 TapRelay；TapRelay 再通过局域网 WebSocket 推送至 Android 手机。它不要求账号、云端数据库或第三方推送服务。
 
 > 默认链路仅适用于可信局域网：`Agent / Hook / 本地日志 -> TapRelay PC -> Android`。通信默认没有身份认证和传输加密，禁止把端口 `1122` 直接暴露到公网。
@@ -17,26 +36,9 @@ TapRelay 是一套本地优先的任务通知中继：Windows PC 上的 AI Agent
 ## 界面预览
 
 <div align="center">
-  <img src="./assets/readme/pc-main.png" alt="TapRelay PC 主界面，展示服务状态、测试通知和应用来源" width="720" />
+  <img src="./assets/readme/android-main.png" alt="TapRelay Android 消息历史和已连接状态" width="320" />
   <br />
-  <sub>PC 主界面：服务、连接与可用通知来源</sub>
-</div>
-
-<div align="center">
-<table>
-  <tr>
-    <td align="center">
-      <img src="./assets/readme/android-main.png" alt="TapRelay Android 消息历史和已连接状态" width="280" />
-      <br />
-      <sub>Android 消息历史</sub>
-    </td>
-    <td align="center">
-      <img src="./assets/readme/android-device-settings.png" alt="TapRelay Android 设备管理和权限入口" width="280" />
-      <br />
-      <sub>设备管理与权限入口</sub>
-    </td>
-  </tr>
-</table>
+  <sub>Android 消息历史：查看已推送的任务状态和任务日志</sub>
 </div>
 
 截图来自当前 PC 程序和 Android 模拟器的真实连通测试。PC 截图中的连接地址已脱敏；Android 截图使用模拟器地址 `10.0.2.2`。
@@ -45,9 +47,10 @@ TapRelay 是一套本地优先的任务通知中继：Windows PC 上的 AI Agent
 
 - PC 桌面端启动内置 HTTP / WebSocket 服务，固定监听端口 `1122`。
 - Android 前台服务维持 WebSocket 连接，断开后自动重连，并将最近 100 条消息保存在本机。
+- 连接成功后自动记录使用过的地址；「设备管理」里可查看最近 10 条（按最近使用倒序）并直接选用，换网络或换 PC 后不必重新手输。
 - 任务卡片优先展示生产者提供的真实 `taskLog`，而不是“任务已完成”之类的通用文案。
 - 支持系统通知、消息历史、可选悬浮卡片、全屏提醒，以及设备名称和主题设置。
-- 对具有可靠会话 ID 的来源，手机可以向原会话发送“继续”指令；PC 负责路由到相应的本地通道。
+- 手机端不提供继续会话或发送新指令入口；需要续接时请直接在电脑端对应应用中操作。
 - 支持任务状态、审批事件与本地自定义应用图标注册；未知来源仍可作为普通 TapRelay 消息接收。
 
 ```text
@@ -66,7 +69,7 @@ Claude / Codex / Trae / 脚本 / 其他本地工具
 ## 组成与要求
 
 | 组件 | 作用 | 运行要求 |
-| --- | --- | --- |
+| --- | --- |
 | `pc-app` | Windows WinForms 桌面端和正式通知服务 | Windows 10/11 x64 |
 | `android-app` | Kotlin / Compose Android 客户端 | Android 8.0（API 26）或更高 |
 | `notify-server` | 独立 Node.js 协议实现和自动化测试入口，不是日常必启服务 | Node.js 24.13.0、npm 11.6.2 |
@@ -117,27 +120,25 @@ Invoke-RestMethod -Uri "http://127.0.0.1:1122/send" `
 
 所有来源最终都应调用 `POST http://127.0.0.1:1122/send`。新接入必须提供真实任务结果、错误详情或等待问题，不能把用户提示词、会话标题或通用状态模板伪装成任务日志。
 
-### 内置来源与继续会话
+### 内置来源
 
-下表说明当前 PC 程序内置的识别或续接通道。第三方工具的本地数据格式、窗口结构和 API 会随版本变化，因此“已内置”不表示每个版本均已完成实机验证；生产使用前应在自己的环境中发送一轮完成、失败和等待事件进行确认。
+下表说明当前 PC 程序内置的识别和监控通道。第三方工具的本地数据格式、窗口结构和 API 会随版本变化，因此“已内置”不表示每个版本均已完成实机验证；生产使用前应在自己的环境中发送一轮完成、失败和等待事件进行确认。
 
-| 来源 | 本地状态 / 日志通道 | 手机继续会话通道 |
-| --- | --- | --- |
-| Claude Code | 官方 Hook 与本地会话信息 | Claude CLI 会话续接 |
-| Claude Code Haha | sidecar 本地事件 | sidecar WebSocket |
-| Codex / ChatGPT | 本地 Codex 会话记录 | Codex CLI 会话续接 |
-| TraeCode CN、TraeWork CN | 本地渲染器日志 | 已确认窗口的专用桌面输入适配 |
-| ZCode | CLI / 桌面端本地日志 | 已确认窗口的专用桌面输入适配 |
-| 豆包 | 本地完成请求日志与当前会话内容 | 已确认窗口的专用桌面输入适配 |
-| WorkBuddy | 本地会话数据与 ACP 事件 | 当前会话的本地 ACP 接口 |
-| OpenCode | 本地 `opencode.db` | OpenCode CLI 会话续接 |
-| DeepSeek Harness | 本地会话记录 | 本地会话 RPC |
-| Freebuff | 本地数据库与 orchestrator 事件 | 本地会话 API |
-| ComfyUI、网盘等工具 | 应用自身的本地工作流或任务状态 | 不提供通用续接承诺 |
+| 来源 | 本地状态 / 日志通道 |
+| --- | --- |
+| Claude Code | 官方 Hook 与本地会话信息 |
+| Claude Code Haha | sidecar 本地事件 |
+| Codex / ChatGPT | 本地 Codex 会话记录 |
+| TraeCode CN、TraeWork CN | 本地渲染器日志 |
+| ZCode | CLI / 桌面端本地日志 |
+| 豆包 | 本地完成请求日志与当前会话内容 |
+| WorkBuddy | 本地会话数据与 ACP 事件 |
+| OpenCode | 本地 `opencode.db` |
+| DeepSeek Harness | 本地会话记录 |
+| Freebuff | 本地数据库与 orchestrator 事件 |
+| ComfyUI、网盘等工具 | 应用自身的本地工作流或任务状态 |
 
-继续会话只有在通知携带可靠的 `sessionId`、PC 找到相应代理且目标应用仍可用时才会显示。手机发出的新指令会通过 WebSocket `agent.call` 的 `session.send` 路由给 PC；断线期间只保留最新一条未发送指令，避免旧消息累积。
-
-“已启动”或“已提交”只表示 PC 已接受并交给目标通道，不代表 Agent 已完成任务。桌面窗口适配还会受目标窗口、应用版本和系统焦点影响，最终状态仍应以应用产生的真实日志或事件为准。
+手机端通知卡片只提供查看、处理审批、停止任务和关闭等操作，不提供继续会话按钮。任务最终状态以应用产生的真实日志或事件为准。
 
 ### Claude Code 与 Codex CLI 安装脚本
 
@@ -207,7 +208,7 @@ Content-Type: application/json
 | `source` | 新接入建议必填 | ASCII 来源键，例如 `claude`、`codex`、`opencode` |
 | `status` | 新接入建议必填 | `completed`、`failed` 或 `waiting` |
 | `taskId` | 新接入建议必填 | 原生任务 / 回合 ID，用于去重 |
-| `sessionId` | 可选 | 原始可续接会话 ID；缺失时不能保证继续会话 |
+| `sessionId` | 可选 | 来源原生会话 ID；仅在来源需要时发送 |
 | `cwd`、`projectName` | 可选 | 实际工作目录和项目名，用于归属与显示 |
 | `durationMs`、`tokenCount` | 可选 | 仅在来源提供可信数据时发送；未知时传 `0` 或省略 |
 
@@ -215,8 +216,9 @@ Content-Type: application/json
 
 ## 数据与权限边界
 
-- Android 只使用本机 `SharedPreferences` 保存连接配置和最近 100 条消息；PC 服务只在内存中维护在线连接，不提供离线补发。
+- Android 只使用本机 `SharedPreferences` 保存连接配置、最近 10 条连接地址（`host_history`）和最近 100 条消息；PC 服务只在内存中维护在线连接，不提供离线补发。
 - Android 设备名称默认是“PC设备”，可以在设备管理中修改；首页展示名称而非 IP 地址。
+- 开启「隐藏地址」后，地址栏、状态行、历史地址列表与系统通知里的地址都会脱敏；清空历史地址不会影响当前连接配置。
 - 通知、相机扫码、悬浮窗、后台运行 / 电池优化和厂商自启动权限应按实际需要授予。拒绝悬浮窗权限时，应用退化为普通系统通知。
 - TapRelay 不应传输密码、令牌、私钥或完整敏感命令参数。`taskLog` 和审批摘要同样应先完成脱敏。
 - 不要使用端口映射、开放公网防火墙或未受保护的反向代理暴露 `1122`。本项目不提供账号体系、云端消息存储或公网推送。
@@ -261,8 +263,6 @@ TapRelay/
 **手机无法连接 PC？** 确认二者位于同一可互访网络，Android 中填写的是 PC 的局域网 IP / 主机名，PC 服务处于运行中，且 Windows 防火墙允许端口 `1122`。访客网络和 AP 隔离会阻断设备互访。
 
 **锁屏后没有提醒？** 先确认 Android 消息历史是否已经收到该条消息；若已收到但无横幅或全屏提示，请检查系统通知权限、通知渠道重要性、电池优化和厂商后台限制。悬浮卡片需要额外授予悬浮窗权限。
-
-**点击“继续”没有生效？** 这通常表示通知缺少可靠 `sessionId`、PC 无法找到原会话、应用已退出，或桌面客户端版本 / 窗口结构发生变化。先查看 PC 运行日志中的 `agent.call` 回执；“已提交”只是提交结果，后续完成通知才是任务终态。
 
 **需要单独启动 Node.js 服务吗？** 不需要。日常使用由 `TapRelay.exe` 内置服务监听 `1122`；`notify-server` 用于协议开发和自动化测试。
 

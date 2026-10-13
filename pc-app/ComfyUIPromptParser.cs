@@ -23,7 +23,7 @@ namespace TapRelay
         private static readonly HashSet<string> TextNodeClassHints = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<string> TextInputKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        public static Action<string>? DebugLog;
+        public static Action<string>? DebugLog = null;
 
         static ComfyUIPromptParser()
         {
@@ -246,7 +246,7 @@ namespace TapRelay
                    text.StartsWith("Assistant:", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static bool IsSamplerNode(string classType, HashSet<string> inputKeys)
+        private static bool IsSamplerNode(string? classType, HashSet<string> inputKeys)
         {
             if (!string.IsNullOrEmpty(classType))
             {
@@ -275,7 +275,7 @@ namespace TapRelay
             return false;
         }
 
-        private static bool IsPlausiblePromptText(string text, string classType, HashSet<string> inputKeys)
+        private static bool IsPlausiblePromptText(string text, string? classType, HashSet<string>? inputKeys)
         {
             if (string.IsNullOrWhiteSpace(text) || text.Length < 2) return false;
             if (IsMetaPrompt(text)) return false;

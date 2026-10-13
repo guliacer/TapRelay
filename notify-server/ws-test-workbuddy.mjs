@@ -4,7 +4,6 @@ const WS_URL = 'ws://127.0.0.1:1122';
 const HTTP_URL = 'http://127.0.0.1:1122/send';
 
 let broadcastReceived = null;
-let resumeResponse = null;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -52,30 +51,6 @@ ws.on('open', async () => {
     console.log('[3] BROADCAST: NONE (FAIL)');
   }
 
-  // ---- Test B: 手机"继续"指令 (agent.resume control) ----
-  // 手机端实际发送的是线路别名 workbuddy-remote（见 NotifyServer.ToWireSource / Android message.source），
-  // 这里用真实来源值验证 PC 端 NormalizeSource 能归并回 workbuddy 并正确解析脚本。
-  const control = {
-    type: 'control',
-    action: 'agent.resume',
-    source: 'workbuddy-remote',
-    sessionId: 'test-session-123',
-    cwd: 'C:\\work\\test-project',
-  };
-  ws.send(JSON.stringify(control));
-  console.log('[4] SENT control agent.resume (source=workbuddy-remote)');
-
-  await sleep(8000); // resume-workbuddy.ps1 最多 5s 启动窗口
-  if (resumeResponse) {
-    console.log('[5] RESUME control_result:');
-    console.log('    succeeded =', resumeResponse.succeeded);
-    console.log('    source    =', resumeResponse.source);
-    console.log('    status    =', resumeResponse.status);
-    console.log('    error     =', resumeResponse.error || '(none)');
-  } else {
-    console.log('[5] RESUME control_result: NONE (FAIL)');
-  }
-
   ws.close();
   process.exit(0);
 });
@@ -91,9 +66,6 @@ ws.on('message', (data) => {
   // 因此按 workbuddy-remote 匹配；同时保留 workbuddy 以兼容直连 /send 的原始来源。
   if (msg.type === 'message' && (msg.source === 'workbuddy' || msg.source === 'workbuddy-remote')) {
     broadcastReceived = msg;
-  }
-  if (msg.type === 'control_result' && msg.action === 'agent.resume') {
-    resumeResponse = msg;
   }
 });
 

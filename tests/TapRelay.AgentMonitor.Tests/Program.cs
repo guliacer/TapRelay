@@ -44,6 +44,10 @@ internal static class Program
         Test("WorkBuddy ACP log path is supported", () =>
             AgentLogPaths.IsSupportedFile(@"C:\Users\alice\.workbuddy\logs\2026-08-04\workspace__hash.log") &&
             AgentLogPaths.IsWorkBuddyLog(@"C:\Users\alice\.workbuddy\logs\2026-08-04\workspace__hash.log"));
+        Test("WorkBuddy AI ACP log path is supported independently", () =>
+            AgentLogPaths.IsSupportedFile(@"C:\Users\alice\.workbuddy-ai\logs\2026-08-04\workspace__hash.log") &&
+            AgentLogPaths.IsWorkBuddyAiLog(@"C:\Users\alice\.workbuddy-ai\logs\2026-08-04\workspace__hash.log") &&
+            !AgentLogPaths.IsWorkBuddyLog(@"C:\Users\alice\.workbuddy-ai\logs\2026-08-04\workspace__hash.log"));
         Test("Unrelated WorkBuddy-looking log path is rejected", () =>
             !AgentLogPaths.IsWorkBuddyLog(@"C:\Users\alice\.workbuddy\log-archive\workspace.log"));
         Test("WorkBuddy ACP prefers the live endpoint for the requested session", () =>
@@ -490,7 +494,21 @@ internal static class Program
                    parsed.TaskLog.Contains("是否发布？", StringComparison.Ordinal) &&
                    parsed.TaskLog.Contains("允许生成", StringComparison.Ordinal) &&
                    parsed.Message.Contains("是否发布？", StringComparison.Ordinal) &&
+                   parsed.CodexInputCallId == "call-question" &&
                    string.IsNullOrWhiteSpace(parsed.RequestId);
+        });
+
+        Test("Codex function_call_output exposes the original call id", () =>
+        {
+            const string line = "{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call_output\",\"call_id\":\"call-question\",\"output\":\"request_user_input is unavailable in Default mode\"}}";
+            return AgentCompletionEventParser.TryReadCodexFunctionCallOutput(line, out var callId) &&
+                   callId == "call-question";
+        });
+
+        Test("Codex non-function output is not treated as a request result", () =>
+        {
+            const string line = "{\"type\":\"response_item\",\"payload\":{\"type\":\"custom_tool_call_output\",\"call_id\":\"call-question\",\"output\":\"Script completed\"}}";
+            return !AgentCompletionEventParser.TryReadCodexFunctionCallOutput(line, out _);
         });
 
         Test("ChatGPT cancellation is ignored", () =>
@@ -592,6 +610,17 @@ internal static class Program
                    parsed.Message.Contains("\u5931\u8d25", StringComparison.Ordinal);
         });
 
+        Test("WorkBuddy Prompt completed timestamp separates turns but matches across logs", () =>
+        {
+            const string turn1 = "[2026/10/12 22:18:33.836] [Info] [AcpView]  Prompt completed for session s-1, stopReason: end_turn, finishReason: stop";
+            const string turn2 = "[2026/10/12 22:33:19.418] [Info] [AcpView]  Prompt completed for session s-1, stopReason: end_turn, finishReason: stop";
+            const string turn2OtherLog = "[2026/10/12 22:33:19.418] [Info] [AcpView]  Prompt completed for session s-1, stopReason: end_turn, finishReason: stop";
+            var ts1 = AgentCompletionEventParser.ReadWorkBuddyLogTimestamp(turn1);
+            var ts2 = AgentCompletionEventParser.ReadWorkBuddyLogTimestamp(turn2);
+            var ts2Other = AgentCompletionEventParser.ReadWorkBuddyLogTimestamp(turn2OtherLog);
+            return ts1 != ts2 && ts2 == ts2Other && ts2 == "2026/10/12 22:33:19.418";
+        });
+
         Test("WorkBuddy cancellation session_end is ignored", () =>
         {
             const string line = "[2026/8/4 12:00:02.000] [Info] [ACP StreamManager] outgoingWritable.write called, message={\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{\"sessionId\":\"workbuddy-session\",\"update\":{\"sessionUpdate\":\"session_end\",\"stopReason\":\"cancelled\"}}}";
@@ -612,7 +641,7 @@ internal static class Program
             return sessionId == "workbuddy-session" &&
                    AgentCompletionEventParser.TryParseWorkBuddyLine(resultLine, sessionId, out var parsed) &&
                    parsed.Status == "completed" &&
-                   parsed.TaskId == "workbuddy-session:2026/8/4 12:00:03.040";
+                   parsed.TaskId == "workbuddy-session";
         });
 
         Test("WorkBuddy current ACP final error parses as failed", () =>
@@ -620,7 +649,7 @@ internal static class Program
             const string line = "[2026/8/4 12:00:04.000] [Info] [ACP Agent] RESULT: isStream=true, isFinal=true, hasInterruptions=false, hasError=true";
             return AgentCompletionEventParser.TryParseWorkBuddyLine(line, "workbuddy-session", out var parsed) &&
                    parsed.Status == "failed" &&
-                   parsed.TaskId == "workbuddy-session:2026/8/4 12:00:04.000";
+                   parsed.TaskId == "workbuddy-session";
         });
 
         Test("WorkBuddy permission request parses as waiting", () =>
@@ -1542,12 +1571,13 @@ internal static class Program
                 Environment.SetEnvironmentVariable(AgentLogPaths.AppDataOverrideVariable, Path.Combine(temp, "appdata"));
                 Environment.SetEnvironmentVariable(AgentLogPaths.LocalAppDataOverrideVariable, Path.Combine(temp, "localappdata"));
                 var roots = AgentLogPaths.GetWatchDirectories();
-                return roots.Count == 10 &&
+                return roots.Count == 11 &&
                        roots[3].StartsWith(Path.Combine(temp, "user"), StringComparison.OrdinalIgnoreCase) &&
                        roots[0].StartsWith(Path.Combine(temp, "appdata"), StringComparison.OrdinalIgnoreCase) &&
                        roots[2].EndsWith(Path.Combine("appdata", "TraeWork CN", "logs"), StringComparison.OrdinalIgnoreCase) &&
                        roots[8].StartsWith(Path.Combine(temp, "localappdata"), StringComparison.OrdinalIgnoreCase) &&
-                       roots[9].EndsWith(Path.Combine("user", ".workbuddy", "logs"), StringComparison.OrdinalIgnoreCase);
+                       roots[9].EndsWith(Path.Combine("user", ".workbuddy", "logs"), StringComparison.OrdinalIgnoreCase) &&
+                       roots[10].EndsWith(Path.Combine("user", ".workbuddy-ai", "logs"), StringComparison.OrdinalIgnoreCase);
             }
             finally
             {
@@ -1641,6 +1671,34 @@ internal static class Program
             return DoubaoTaskContentSource.IsSuggestionSubtree("suggest-list-item item-active") &&
                    DoubaoTaskContentSource.IsSuggestionSubtree("SUGGEST-LIST-ITEM") &&
                    !DoubaoTaskContentSource.IsSuggestionSubtree("v_list_row assistant");
+        });
+
+        Test("Doubao IndexedDB assistant text is correlated and bounded", () =>
+        {
+            var values = new[]
+            {
+                BuildDoubaoStructuredCloneMessage(
+                    userType: 2,
+                    text: "当前用户问题：豆包测试输入",
+                    isFinished: true)
+                    .Concat(BuildDoubaoStructuredCloneMessage(
+                        userType: 4,
+                        text: new string('真', 5000),
+                        isFinished: true))
+                    .ToArray()
+            };
+            var taskLog = DoubaoIndexedDbMessageReader.TryReadAssistantMessageFromRawValues(
+                values,
+                "豆包测试输入");
+            return taskLog.Length <= 4000 &&
+                   taskLog.StartsWith("真真真", StringComparison.Ordinal) &&
+                   taskLog.IndexOf("豆包测试输入", StringComparison.Ordinal) < 0;
+        });
+
+        Test("Doubao completed notification summary stays within protocol limit", () =>
+        {
+            var summary = DoubaoTaskContentSource.BuildCompletedMessage(new string('结', 4000));
+            return summary.Length <= 500 && summary.EndsWith("...", StringComparison.Ordinal);
         });
 
         Test("OpenCode ReadTerminalSince filters out subagent sessions", () =>
@@ -2896,5 +2954,34 @@ internal static class Program
         }
 
         return string.Empty;
+    }
+
+    private static byte[] BuildDoubaoStructuredCloneMessage(int userType, string text, bool isFinished)
+    {
+        var bytes = new List<byte>();
+        AddDoubaoField(bytes, "user_type");
+        bytes.Add((byte)'I');
+        bytes.Add((byte)userType);
+        AddDoubaoField(bytes, "content_blocks_v2");
+        bytes.Add((byte)'A');
+        bytes.Add(1);
+        AddDoubaoField(bytes, "text_block");
+        bytes.Add((byte)'o');
+        AddDoubaoField(bytes, "text");
+        bytes.Add((byte)'c');
+        bytes.AddRange(BitConverter.GetBytes((ushort)text.Length));
+        bytes.AddRange(Encoding.Unicode.GetBytes(text));
+        AddDoubaoField(bytes, "is_finish");
+        bytes.Add((byte)'"');
+        bytes.Add(1);
+        bytes.Add((byte)(isFinished ? '1' : '0'));
+        return bytes.ToArray();
+    }
+
+    private static void AddDoubaoField(List<byte> bytes, string name)
+    {
+        bytes.Add((byte)'"');
+        bytes.Add((byte)name.Length);
+        bytes.AddRange(Encoding.ASCII.GetBytes(name));
     }
 }

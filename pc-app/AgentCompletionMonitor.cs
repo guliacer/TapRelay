@@ -36,6 +36,10 @@ namespace TapRelay
         // 会让短窗口形同虚设）。
         private static readonly TimeSpan TraeUsageWaitWindow = TimeSpan.FromSeconds(4);
         private static readonly TimeSpan TraeUsageFlushInterval = TimeSpan.FromSeconds(1);
+        // Codex request_user_input 不是可靠的 waiting 信号：Default 模式会先写入
+        // function_call，随后以 function_call_output 返回 unavailable。给对应输出
+        // 留出一个短窗口，避免把调用失败误报为手机待处理任务。
+        private static readonly TimeSpan CodexInputValidationGracePeriod = TimeSpan.FromSeconds(2);
         // 豆包 rlog 在 SSE 结束时先落盘，WebView 的助手节点随后才完成渲染；
         // 在这段窗口内重试可避免把网络终态误当成任务正文。
         private static readonly TimeSpan[] DoubaoAssistantReadDelays =
@@ -65,6 +69,7 @@ namespace TapRelay
         private readonly HashSet<string> _workbuddyWaitingSessions = new HashSet<string>(StringComparer.Ordinal);
         private readonly Dictionary<string, PendingPermissionWait> _pendingPermissionWaits = new Dictionary<string, PendingPermissionWait>(StringComparer.Ordinal);
         private readonly Dictionary<string, PendingZCodeWait> _pendingZCodeWaits = new Dictionary<string, PendingZCodeWait>(StringComparer.Ordinal);
+        private readonly Dictionary<string, PendingCodexInput> _pendingCodexInputs = new Dictionary<string, PendingCodexInput>(StringComparer.Ordinal);
         private readonly List<PendingTraeCompletion> _pendingTraeCompletions = new List<PendingTraeCompletion>();
         private readonly HashSet<string> _pendingDoubaoCompletions = new HashSet<string>(StringComparer.Ordinal);
         private readonly Dictionary<string, CancellationTokenSource> _freebuffElevationWaits =
@@ -90,17 +95,21 @@ namespace TapRelay
             NotifyServer server,
             Action<string> log,
             Func<string, bool>? isSourceProcessRunning = null,
-            Func<string, DateTime, (string Title, string Body)?>? readTraeToast = null)
+            Func<string, DateTime, (string Title, string Body)?>? readTraeToast = null,
+            Action<string>? detailLog = null)
         {
             _server = server ?? throw new ArgumentNullException(nameof(server));
             _log = log ?? throw new ArgumentNullException(nameof(log));
+            // 下游监视器的轮询细节只写诊断文件，首页只保留任务事件。
+            detailLog ??= log;
             _isSourceProcessRunning = isSourceProcessRunning ?? AdaptedProcessGate.IsRunningForSource;
             _readTraeToast = readTraeToast ?? ReadTraeToast;
             _baiduNetdiskMonitor = new BaiduNetdiskBatchMonitor(DispatchBaiduBatch, _log);
             _quarkNetdiskMonitor = new QuarkNetdiskBatchMonitor(DispatchQuarkBatch, _log);
             _adriveTransferMonitor = new AdriveTransferMonitor(DispatchAdriveTask, _log);
             _opencodeMonitor = new OpenCodeMonitor(DispatchOpenCodeTask, _log);
-            _deepseekHarnessMonitor = new DeepSeekHarnessMonitor(DispatchDeepSeekHarnessTask, _log);
+            _deepseekHarnessMonitor = new DeepSeekHarnessMonitor(
+                DispatchDeepSeekHarnessTask, _log, isProcessRunning: null, detailLog: detailLog);
             _freebuffMonitor = new FreebuffMonitor(DispatchFreebuffTask, _log);
         }
 
@@ -165,6 +174,7 @@ namespace TapRelay
                 _watchedDirectories.Clear();
                 _traeSessionKinds.Clear();
                 _pendingDoubaoCompletions.Clear();
+                _pendingCodexInputs.Clear();
                 _files.Clear();
             }
 
@@ -474,6 +484,7 @@ namespace TapRelay
             FlushExpiredTraeCompletions();
             TryFirePendingPermissionWaits();
             TryFireZCodeWaits();
+            TryFirePendingCodexInputs();
 
             if (!runFullRecoveryScan)
             {
@@ -555,7 +566,7 @@ namespace TapRelay
             }
         }
 
-        private static List<string> ReadNewLines(string path, FileState state)
+        private List<string> ReadNewLines(string path, FileState state)
         {
             var lines = new List<string>();
             state.LastLength = -1L;
@@ -565,12 +576,19 @@ namespace TapRelay
                 using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
                 if (stream.Length < state.Position)
                 {
-                    state.Position = 0;
+                    // 文件被截断或轮转后，当前位置之前的内容已经处理过；从头重放
+                    // 会把历史 request_user_input/完成事件再次推送。直接建立新基线，
+                    // 后续追加内容由下一次扫描处理。
+                    CancelPendingCodexInputsForPathLocked(path);
+                    state.Position = stream.Length;
                     state.Pending = string.Empty;
                     state.CodexSessionKind = CodexSessionKind.Unknown;
                     state.LastCodexSessionId = string.Empty;
                     state.LastCodexProjectName = string.Empty;
                     state.LastCodexCwd = string.Empty;
+                    state.LastLength = stream.Length;
+                    state.LastWriteUtc = File.GetLastWriteTimeUtc(path);
+                    return lines;
                 }
 
                 stream.Seek(state.Position, SeekOrigin.Begin);
@@ -646,7 +664,8 @@ namespace TapRelay
                 return;
             }
 
-            if (AgentLogPaths.IsWorkBuddyLog(path))
+            if (AgentLogPaths.IsWorkBuddyLog(path) ||
+                AgentLogPaths.IsWorkBuddyAiLog(path))
             {
                 ProcessWorkBuddyLine(path, line);
                 return;
@@ -1493,6 +1512,12 @@ namespace TapRelay
                 return;
             }
 
+            if (AgentCompletionEventParser.TryReadCodexFunctionCallOutput(line, out var outputCallId))
+            {
+                ResolvePendingCodexInput(path, outputCallId);
+                return;
+            }
+
             if (!AgentCompletionEventParser.TryParseChatGPTLine(line, out var completionEvent))
             {
                 return;
@@ -1541,7 +1566,112 @@ namespace TapRelay
                     codexCwd,
                     completionEvent.TaskId,
                     completionEvent.Message));
+
+            if (string.Equals(completionEvent.Status, "waiting", StringComparison.OrdinalIgnoreCase))
+            {
+                RegisterPendingCodexInput(path, completionEvent);
+                return;
+            }
+
             DispatchParsedEvent(completionEvent);
+        }
+
+        private void RegisterPendingCodexInput(string path, AgentCompletionEventData completionEvent)
+        {
+            var callId = FirstNonEmpty(completionEvent.CodexInputCallId, completionEvent.TaskId);
+            var key = BuildPendingCodexInputKey(path, callId);
+            completionEvent.CodexInputCallId = callId;
+
+            lock (_gate)
+            {
+                if (_disposed || _eventKeys.Contains(completionEvent.EventKey) ||
+                    _pendingCodexInputs.ContainsKey(key))
+                {
+                    return;
+                }
+
+                _pendingCodexInputs[key] = new PendingCodexInput(
+                    key,
+                    completionEvent,
+                    DateTimeOffset.UtcNow);
+            }
+
+            _log("Codex request_user_input 等待结果校验：callId=" + callId);
+        }
+
+        private void ResolvePendingCodexInput(string path, string callId)
+        {
+            var key = BuildPendingCodexInputKey(path, callId);
+            PendingCodexInput? pending = null;
+            lock (_gate)
+            {
+                if (_pendingCodexInputs.TryGetValue(key, out pending))
+                {
+                    _pendingCodexInputs.Remove(key);
+                    // 标记该调用已处理，避免文件轮转/重复日志再次登记并广播。
+                    RememberEventLocked(pending.Event.EventKey);
+                }
+            }
+
+            if (pending != null)
+            {
+                _log("Codex request_user_input 已收到 function_call_output，抑制 waiting 通知：callId=" +
+                     callId);
+            }
+        }
+
+        private void TryFirePendingCodexInputs()
+        {
+            var nowUtc = DateTimeOffset.UtcNow;
+            var due = new List<PendingCodexInput>();
+            lock (_gate)
+            {
+                foreach (var pending in _pendingCodexInputs.Values)
+                {
+                    if (nowUtc - pending.CreatedAtUtc >= CodexInputValidationGracePeriod)
+                    {
+                        due.Add(pending);
+                    }
+                }
+            }
+
+            foreach (var pending in due)
+            {
+                lock (_gate)
+                {
+                    if (!_pendingCodexInputs.Remove(pending.Key))
+                    {
+                        continue;
+                    }
+                }
+
+                _log("Codex request_user_input 未收到 function_call_output，确认是真实 waiting：callId=" +
+                     pending.Event.CodexInputCallId);
+                DispatchParsedEvent(pending.Event);
+            }
+        }
+
+        private static string BuildPendingCodexInputKey(string path, string callId)
+        {
+            return path + "\u0000" + callId;
+        }
+
+        private void CancelPendingCodexInputsForPathLocked(string path)
+        {
+            var prefix = path + "\u0000";
+            var keys = new List<string>();
+            foreach (var key in _pendingCodexInputs.Keys)
+            {
+                if (key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    keys.Add(key);
+                }
+            }
+
+            foreach (var key in keys)
+            {
+                _pendingCodexInputs.Remove(key);
+            }
         }
 
         private string GetCodexProjectName(string path)
@@ -2139,15 +2269,16 @@ namespace TapRelay
                     }
 
                     var taskLog = DoubaoTaskContentSource.TryReadAssistantMessageForInput(
-                        completionEvent.CorrelationText);
+                        completionEvent.CorrelationText,
+                        out var contentSource);
                     if (string.IsNullOrWhiteSpace(taskLog))
                     {
                         continue;
                     }
 
                     completionEvent.TaskLog = taskLog;
-                    completionEvent.Message = taskLog;
-                    _log("豆包完成正文来自渲染后的助手消息：taskId=" +
+                    completionEvent.Message = DoubaoTaskContentSource.BuildCompletedMessage(taskLog);
+                    _log("豆包完成正文已读取：source=" + contentSource + " taskId=" +
                          completionEvent.TaskId + " textLength=" + taskLog.Length);
                     DispatchParsedEvent(completionEvent);
                     return;
@@ -2176,8 +2307,12 @@ namespace TapRelay
 
         private void ProcessWorkBuddyLine(string path, string line)
         {
+            var workBuddySource = AgentLogPaths.IsWorkBuddyAiLog(path)
+                ? "workbuddy-ai"
+                : "workbuddy";
             var fallbackSessionId = RememberWorkBuddySessionId(path, line);
             RememberWorkBuddyRequestId(path, line);
+            ObserveWorkBuddyCompaction(path, line);
 
             // 真正需要用户确认的等待（批量删除确认、权限确认、AskUserQuestion 等）：
             // SessionManager 进入 pending（signal=awaiting_input, from=working, to=pending）
@@ -2195,6 +2330,7 @@ namespace TapRelay
                 }
                 awaitingEvent.EventKey = "workbuddy:" + path + ":" + awaitingEvent.EventKey;
                 awaitingEvent.RequestId = "workbuddy:" + awaitingEvent.SessionId;
+                PrepareWorkBuddyEvent(awaitingEvent, workBuddySource);
                 awaitingEvent.ProjectName = FirstNonEmpty(
                     awaitingEvent.ProjectName,
                     GetWorkBuddyProjectName(path));
@@ -2229,6 +2365,7 @@ namespace TapRelay
 
                 pendingEvent.EventKey = "workbuddy:waiting-p:" + pendingEvent.TaskId;
                 pendingEvent.RequestId = "workbuddy:" + pendingEvent.SessionId;
+                PrepareWorkBuddyEvent(pendingEvent, workBuddySource);
                 pendingEvent.ProjectName = FirstNonEmpty(
                     pendingEvent.ProjectName,
                     GetWorkBuddyProjectName(path));
@@ -2256,7 +2393,7 @@ namespace TapRelay
                         _workbuddyWaitingSessions.Remove(transitionSessionId);
                     }
                     _eventKeys.RemoveWhere(
-                        key => key.StartsWith("workbuddy:waiting-p:" + transitionSessionId + ":", StringComparison.Ordinal));
+                        key => key.StartsWith(workBuddySource + ":waiting-p:" + transitionSessionId + ":", StringComparison.Ordinal));
                 }
             }
 
@@ -2271,7 +2408,46 @@ namespace TapRelay
                     }
 
                     state.WorkBuddyFailureMarker = true;
+                    state.WorkBuddyFailureMarkerTime = DateTimeOffset.UtcNow;
                 }
+                return;
+            }
+
+            // executeStopHooks 只表示当前模型运行段结束。它会在普通回合、上下文
+            // 压缩和自动重试时都出现，即使 stopReason=completed 也不代表用户任务
+            // 完成；真正终态由 Prompt completed / session_end / 最终 RESULT 提供。
+            if (line.IndexOf("executeStopHooks", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                var stopHookSessionId = AgentCompletionEventParser.ReadWorkBuddyLogAssignment(line, "sessionId");
+                var stopHookReason = AgentCompletionEventParser.ReadWorkBuddyLogAssignment(line, "stopReason");
+                _log("忽略 WorkBuddy 非权威 executeStopHooks 终态：session=" +
+                     (string.IsNullOrWhiteSpace(stopHookSessionId) ? "unknown" : stopHookSessionId) +
+                     " stopReason=" +
+                     (string.IsNullOrWhiteSpace(stopHookReason) ? "unknown" : stopHookReason));
+                return;
+            }
+
+            if (AgentCompletionEventParser.TryParseWorkBuddyPromptCompletedLine(line, out var promptDoneEvent))
+            {
+                if (ShouldSuppressWorkBuddyTerminal(path, promptDoneEvent.Status))
+                {
+                    _log("WorkBuddy 正在进行上下文压缩/自动续跑，忽略中间终态：session=" +
+                         promptDoneEvent.SessionId + " status=" + promptDoneEvent.Status);
+                    return;
+                }
+
+                promptDoneEvent.EventKey = WorkBuddyCompletionEventKey(
+                    promptDoneEvent,
+                    AgentCompletionEventParser.ReadWorkBuddyLogTimestamp(line));
+                PrepareWorkBuddyEvent(promptDoneEvent, workBuddySource);
+                promptDoneEvent.ProjectName = FirstNonEmpty(
+                    promptDoneEvent.ProjectName,
+                    GetWorkBuddyProjectName(path));
+                if (!ApplyWorkBuddySessionContent(promptDoneEvent, path))
+                {
+                    ApplyToastNotificationContent(promptDoneEvent);
+                }
+                DispatchParsedEvent(promptDoneEvent);
                 return;
             }
 
@@ -2282,6 +2458,13 @@ namespace TapRelay
 
             if (completionEvent.Status == "completed" || completionEvent.Status == "failed")
             {
+                if (ShouldSuppressWorkBuddyTerminal(path, completionEvent.Status))
+                {
+                    _log("WorkBuddy 正在进行上下文压缩/自动续跑，忽略中间终态：session=" +
+                         completionEvent.SessionId + " status=" + completionEvent.Status);
+                    return;
+                }
+
                 var failureMarked = ShouldTreatWorkBuddyTerminalAsFailure(
                     path,
                     completionEvent.TaskId,
@@ -2297,7 +2480,12 @@ namespace TapRelay
             // WorkBuddy broadcasts the same ACP update to several streams. Keep
             // the file in the monitor key so identical task ids in separate
             // workspace logs remain independent before server-level dedupe.
-            completionEvent.EventKey = "workbuddy:" + path + ":" + completionEvent.EventKey;
+            // WorkBuddy 完成/失败事件以全局 sessionId 为主键去重，避免同一会话在主
+            // 线程日志与会话日志各出现一次时重复推送手机。
+            completionEvent.EventKey = WorkBuddyCompletionEventKey(
+                completionEvent,
+                AgentCompletionEventParser.ReadWorkBuddyLogTimestamp(line));
+            PrepareWorkBuddyEvent(completionEvent, workBuddySource);
             completionEvent.ProjectName = FirstNonEmpty(
                 completionEvent.ProjectName,
                 GetWorkBuddyProjectName(path));
@@ -2310,6 +2498,23 @@ namespace TapRelay
                 ApplyToastNotificationContent(completionEvent);
             }
             DispatchParsedEvent(completionEvent);
+        }
+
+        private static void PrepareWorkBuddyEvent(
+            AgentCompletionEventData completionEvent,
+            string source)
+        {
+            completionEvent.Source = source;
+            if (completionEvent.EventKey.StartsWith("workbuddy:", StringComparison.OrdinalIgnoreCase))
+            {
+                completionEvent.EventKey = source + completionEvent.EventKey.Substring("workbuddy".Length);
+            }
+
+            if (completionEvent.RequestId.StartsWith("workbuddy:", StringComparison.OrdinalIgnoreCase))
+            {
+                completionEvent.RequestId = source + ":" +
+                    completionEvent.RequestId.Substring("workbuddy:".Length);
+            }
         }
 
         private void RememberWorkBuddyRequestId(string path, string line)
@@ -2340,6 +2545,58 @@ namespace TapRelay
             }
         }
 
+        /// <summary>
+        /// WorkBuddy 在上下文压缩或自动重试前会先调用 executeStopHooks，并把
+        /// stopReason 写成 completed。这个 completed 只表示本次模型运行段结束，
+        /// 后面还会继续 compact/resume；记录该生命周期，供终态分支统一屏蔽。
+        /// </summary>
+        private void ObserveWorkBuddyCompaction(
+            string path,
+            string line)
+        {
+            var startsCompaction =
+                line.IndexOf("Aborting session for context compaction", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                line.IndexOf("willRetry=true reason=compacting", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                line.IndexOf("COMPACT_STARTED", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                line.IndexOf("broadcastCompactStarted", StringComparison.OrdinalIgnoreCase) >= 0;
+            var endsCompaction =
+                line.IndexOf("COMPACT_ENDED", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                line.IndexOf("broadcastCompactCompleted", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (!startsCompaction && !endsCompaction)
+            {
+                return;
+            }
+
+            lock (_gate)
+            {
+                var state = GetWorkBuddyStateLocked(path);
+                if (startsCompaction)
+                {
+                    state.WorkBuddyCompactionInProgress = true;
+                }
+
+                if (endsCompaction)
+                {
+                    state.WorkBuddyCompactionInProgress = false;
+                }
+            }
+        }
+
+        private bool ShouldSuppressWorkBuddyTerminal(string path, string status)
+        {
+            if (!string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            lock (_gate)
+            {
+                return _files.TryGetValue(path, out var state) &&
+                       state.WorkBuddyCompactionInProgress;
+            }
+        }
+
         private FileState GetWorkBuddyStateLocked(string path)
         {
             if (!_files.TryGetValue(path, out var state))
@@ -2348,6 +2605,16 @@ namespace TapRelay
                 _files[path] = state;
             }
             return state;
+        }
+
+        // 完成键 = 状态 + 会话 + 行时间戳。同一条 WorkBuddy 完成行在主线程日志与
+        // 会话日志中时间戳相同,仍会被去重;同一会话的下一轮完成时间戳不同,不再被吞掉。
+        private static string WorkBuddyCompletionEventKey(AgentCompletionEventData completionEvent, string logTimestamp)
+        {
+            var id = string.IsNullOrWhiteSpace(completionEvent.SessionId)
+                ? completionEvent.TaskId
+                : completionEvent.SessionId.Trim();
+            return "workbuddy:" + completionEvent.Status + ":" + id + ":" + (logTimestamp ?? string.Empty);
         }
 
         private bool ShouldTreatWorkBuddyTerminalAsFailure(
@@ -2362,12 +2629,18 @@ namespace TapRelay
                     return false;
                 }
 
-                var failureMarked = state.WorkBuddyFailureMarker;
+                // 校验机制：仅当失败标记是近 30 秒内打下的（真正与本轮完成相邻的错误），
+                // 才允许把 completed 翻转为 failed；陈旧的标记（来自更早的轮次/工具重试）
+                // 不得污染后续正常完成，避免「完成被误判为失败」（见 09-24 b91b6456）。
+                var markerFresh = state.WorkBuddyFailureMarkerTime.HasValue &&
+                    (DateTimeOffset.UtcNow - state.WorkBuddyFailureMarkerTime.Value) <= TimeSpan.FromSeconds(30);
+                var failureMarked = state.WorkBuddyFailureMarker && markerFresh;
                 var repeatedFailure = string.Equals(
                     state.LastWorkBuddyFailedTaskId,
                     taskId,
                     StringComparison.Ordinal);
                 state.WorkBuddyFailureMarker = false;
+                state.WorkBuddyFailureMarkerTime = null;
 
                 if (string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase))
                 {
@@ -2397,6 +2670,7 @@ namespace TapRelay
             var separator = name.IndexOf("__", StringComparison.Ordinal);
             var candidate = separator > 0 ? name.Substring(0, separator) : name;
             if (string.Equals(candidate, ".workbuddy", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(candidate, ".workbuddy-ai", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(candidate, "workbuddy", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(candidate, "unknown-workspace", StringComparison.OrdinalIgnoreCase))
             {
@@ -3204,6 +3478,7 @@ namespace TapRelay
             lock (_gate)
             {
                 if (_disposed) return;
+                CancelPendingCodexInputsForPathLocked(path);
                 try
                 {
                     var info = new FileInfo(path);
@@ -3227,6 +3502,7 @@ namespace TapRelay
         {
             if (AgentLogPaths.IsClaudeTranscript(path)) return "claude";
             if (AgentLogPaths.IsChatGPTSession(path)) return "codex";
+            if (AgentLogPaths.IsWorkBuddyAiLog(path)) return "workbuddy-ai";
             if (AgentLogPaths.IsWorkBuddyLog(path)) return "workbuddy";
             if (AgentLogPaths.IsTraeLog(path)) return GetTraeSource(path);
             if (AgentLogPaths.IsZCodeCliLog(path) || AgentLogPaths.IsZCodeDesktopLog(path)) return "zcode";
@@ -3238,19 +3514,41 @@ namespace TapRelay
         {
             lock (_gate)
             {
-                if (!_eventKeys.Add(key))
-                {
-                    return false;
-                }
-
-                if (_eventKeys.Count > 500)
-                {
-                    _eventKeys.Clear();
-                    _eventKeys.Add(key);
-                }
-
-                return true;
+                return RememberEventLocked(key);
             }
+        }
+
+        private bool RememberEventLocked(string key)
+        {
+            if (!_eventKeys.Add(key))
+            {
+                return false;
+            }
+
+            if (_eventKeys.Count > 500)
+            {
+                _eventKeys.Clear();
+                _eventKeys.Add(key);
+            }
+
+            return true;
+        }
+
+        private sealed class PendingCodexInput
+        {
+            public PendingCodexInput(
+                string key,
+                AgentCompletionEventData @event,
+                DateTimeOffset createdAtUtc)
+            {
+                Key = key;
+                Event = @event;
+                CreatedAtUtc = createdAtUtc;
+            }
+
+            public string Key { get; }
+            public AgentCompletionEventData Event { get; }
+            public DateTimeOffset CreatedAtUtc { get; }
         }
 
         private FileState GetClaudeStateLocked(string path)
@@ -3626,8 +3924,14 @@ namespace TapRelay
             public CodexTurnTokenAccumulator CodexTokens { get; } = new CodexTurnTokenAccumulator();
             public CodexSessionKind CodexSessionKind { get; set; }
             public bool WorkBuddyFailureMarker { get; set; }
+            public DateTimeOffset? WorkBuddyFailureMarkerTime { get; set; }
             public string LastWorkBuddyFailedTaskId { get; set; } = string.Empty;
             public string LastWorkBuddySessionId { get; set; } = string.Empty;
+            /// <summary>
+            /// 上下文压缩会先输出一个 stopReason=completed 的中间钩子，随后继续
+            /// compact/resume。该标志覆盖这段生命周期，避免把中间钩子当任务完成。
+            /// </summary>
+            public bool WorkBuddyCompactionInProgress { get; set; }
             /// <summary>最近一次模型请求的 rootRequestId，用于按请求匹配单次积分。</summary>
             public string LastWorkBuddyRequestId { get; set; } = string.Empty;
         }

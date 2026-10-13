@@ -7,13 +7,11 @@ namespace TapRelay
     /// <summary>
     /// 持久化的 PC 端轻量 UI 状态：
     /// - TestMessage：测试通知输入框文本（重启后仍保留，不回退默认值）
-    /// - AddressMasked：隐藏 IP 开关（true 表示地址框显示脱敏内容）
     /// - DarkMode：深/浅色主题（null 表示未设置过，回退旧 settings.json）
     /// </summary>
     internal sealed class UiState
     {
         public string TestMessage { get; set; } = string.Empty;
-        public bool AddressMasked { get; set; }
         public bool? DarkMode { get; set; }
     }
 

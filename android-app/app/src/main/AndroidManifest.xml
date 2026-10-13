@@ -95,9 +95,7 @@
                 <action android:name="com.lan.notify.notification.ACTION_DISMISS_ARCHIVE" />
                 <action android:name="com.lan.notify.notification.ACTION_APPROVAL_ALLOW" />
                 <action android:name="com.lan.notify.notification.ACTION_APPROVAL_DENY" />
-                <action android:name="com.lan.notify.notification.ACTION_RESUME_AGENT" />
                 <action android:name="com.lan.notify.notification.ACTION_AGENT_STOP" />
-                <action android:name="com.lan.notify.notification.ACTION_AGENT_CONTINUE" />
             </intent-filter>
         </receiver>
     </application>

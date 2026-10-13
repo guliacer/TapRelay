@@ -23,7 +23,6 @@ namespace TapRelay
         private static readonly HashSet<string> Caps = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "agent.probe",
-            "session.send",
             "session.stop"
         };
         private static readonly HttpClient Client = new HttpClient

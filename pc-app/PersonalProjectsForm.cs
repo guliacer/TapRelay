@@ -2,17 +2,26 @@ using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
 namespace TapRelay
 {
     /// <summary>
-    /// 个人项目面板：严格参照素言（W:\提示词）PromptCard 的视觉规范——
-    /// 圆角 12px 卡片 + 1px 描边 + 顶部主题色带 header + 描述 + 胶囊标签 +
-    /// 底栏（分隔线 + 统计/操作）。8 个胶囊色轮换（sage/mist/clay/lavender/
-    /// fog/rose/sand/stone），深/浅色各一套，与手机端 PersonalProjectsDialog
-    /// 的 ProjectCardTone 色值保持一致。
+    /// 个人项目面板：单列卡片流，与手机端 PersonalProjectsDialog 视觉对齐。
+    ///
+    /// 卡片结构（自上而下）：
+    ///   - 头部条带：左侧主题色 accent 条 + 标题 + 右上 GitHub 图标
+    ///   - 描述：单行/双行省略
+    ///   - 胶囊形标签（单行排列，超出截断）
+    ///   - 底部分隔线
+    ///   - 直达（实心主题色） / 复制（描边） 按钮
+    ///
+    /// 不复刻两列紧凑栅格的旧版：那是「图标按钮 + github.com 页脚」，占位密度高但
+    /// 缺少「按项目说事」的语气；当前改用「主题色按钮 + 文字按钮」承担主/次操作，
+    /// 与手机保持一致。
     /// </summary>
     internal sealed class PersonalProjectsForm : Form
     {
@@ -28,6 +37,46 @@ namespace TapRelay
         private readonly bool _darkMode;
         private readonly TableLayoutPanel _root = new TableLayoutPanel();
         private readonly Panel _scrollBody = new Panel();
+        private readonly TableLayoutPanel _cardList = new TableLayoutPanel();
+        private readonly ToolTip _toolTip = new ToolTip();
+
+        private const int HeaderHeight = 76;
+        // 以下三项按手机端 PersonalProjectCard / LazyVerticalGrid 的实际数值对齐，不是拍脑袋定的：
+        //   头部 56 = padding 11 + accent 条 34 + padding 11
+        //   卡高 212 = 头部 56 + 分隔线 1 + 正文(14 + 描述 36 + 14 + 标签 18 + 14) + 分隔线 1 + 14 + 按钮 32 + 12
+        //   卡间距 20 = LazyVerticalGrid verticalArrangement = spacedBy(20.dp)
+        private const int CardHeight = 212;
+        private const int CardGap = 20;
+        private const int CardHeaderHeight = 56;
+        private const int CardCornerRadius = 12;   // 手机端 RoundedCornerShape(12.dp)
+        private const int ActionButtonHeight = 32;
+        private const int ActionButtonPaddingX = 12;
+
+        /// <summary>
+        /// 手机端 <c>GITHUB_MARK_PATH</c> 的原文照搬（24×24 viewport，线稿 Octocat）。
+        /// 改这个字符串前请先同步 android-app 的 PersonalProjectsDialog.kt，两端必须一致。
+        /// </summary>
+        private const string GitHubMarkPath =
+            "M12,3.5 C7.3,3.5 3.5,7.3 3.5,12 C3.5,15.7 5.9,18.8 9.2,19.9 " +
+            "M14.8,19.9 C18.1,18.8 20.5,15.7 20.5,12 C20.5,7.3 16.7,3.5 12,3.5 " +
+            "M8.5,18 C8.5,16.5 9.2,15.5 10.2,15 " +
+            "C8,14.7 6.6,13.6 6.6,11.2 C6.6,10.1 7,9.2 7.7,8.5 " +
+            "C7.5,7.8 7.5,7.1 7.9,6.4 C8.9,6.5 9.7,6.9 10.3,7.3 " +
+            "C11.4,7 12.6,7 13.7,7.3 C14.3,6.9 15.1,6.5 16.1,6.4 " +
+            "C16.5,7.1 16.5,7.8 16.3,8.5 C17,9.2 17.4,10.1 17.4,11.2 " +
+            "C17.4,13.6 16,14.7 13.8,15 C14.8,15.5 15.5,16.5 15.5,18";
+
+        // 操作图标也直接复用手机端的 pathData，避免「卡片头部一样、按钮却不同」。
+        private const string ExternalLinkPath =
+            "M14,3 L21,3 L21,10 M21,3 L11,13 M18,13 L18,19 " +
+            "C18,20.1 17.1,21 16,21 L5,21 C3.9,21 3,20.1 3,19 L3,8 " +
+            "C3,6.9 3.9,6 5,6 L11,6";
+
+        private const string GlobePath =
+            "M12,3 C7,3 3,7 3,12 C3,17 7,21 12,21 C17,21 21,17 21,12 " +
+            "C21,7 17,3 12,3 Z M3,12 L21,12 " +
+            "M12,3 C14.2,5.4 15.5,8.5 15.5,12 C15.5,15.5 14.2,18.6 12,21 " +
+            "M12,3 C9.8,5.4 8.5,8.5 8.5,12 C8.5,15.5 9.8,18.6 12,21";
 
         // 与手机端 PersonalProjectsDialog 保持一致（10 个真实项目）。
         private static readonly PersonalProject[] Projects =
@@ -53,9 +102,9 @@ namespace TapRelay
             FormBorderStyle = FormBorderStyle.Sizable;
             MinimizeBox = false;
             ShowInTaskbar = false;
-            MinimumSize = new Size(620, 480);
-            ClientSize = new Size(880, 680);
-            Font = new Font("Microsoft YaHei UI", 9.5F);
+            MinimumSize = new Size(520, 520);
+            ClientSize = new Size(760, 640);
+            Font = new Font(UiTokens.UiFontFamily, UiTokens.BodyFontSize);
             BackColor = _darkMode
                 ? Color.FromArgb(22, 25, 22)
                 : Color.FromArgb(246, 245, 241);
@@ -75,54 +124,91 @@ namespace TapRelay
         private void BuildLayout()
         {
             var colors = Palette.Create(_darkMode);
+            // 手机端标题计数使用全局 PrimarySageStrong；PC 调色板中对应第 7 个 tone。
+            var headerAccent = colors.Tones.Length > 6
+                ? colors.Tones[6].Foreground
+                : colors.Tones[0].Foreground;
 
             _root.Dock = DockStyle.Fill;
             _root.ColumnCount = 1;
             _root.RowCount = 2;
-            _root.RowStyles.Add(new RowStyle(SizeType.Absolute, 52F));
+            _root.RowStyles.Add(new RowStyle(SizeType.Absolute, HeaderHeight));
             _root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             _root.BackColor = colors.Background;
             _root.Padding = new Padding(20, 14, 20, 14);
 
-            var header = new Label
+            // 顶部头部：标题（粗体）+ 副标题（次级色）+ 项目计数（主题强调色）
+            var header = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 3,
+                BackColor = colors.Background,
+                Padding = new Padding(0),
+                Margin = new Padding(0)
+            };
+            header.RowStyles.Add(new RowStyle(SizeType.Absolute, 28F));
+            header.RowStyles.Add(new RowStyle(SizeType.Absolute, 22F));
+            header.RowStyles.Add(new RowStyle(SizeType.Absolute, 22F));
+
+            header.Controls.Add(new Label
             {
                 Text = "个人项目",
-                AutoSize = false,
                 Dock = DockStyle.Fill,
-                Font = new Font("Microsoft YaHei UI", 13F, FontStyle.Bold),
+                Font = new Font(UiTokens.UiFontFamily, 14F, FontStyle.Bold),
                 ForeColor = colors.TextPrimary,
                 BackColor = colors.Background,
-                TextAlign = ContentAlignment.MiddleLeft
-            };
+                TextAlign = ContentAlignment.MiddleLeft,
+                Margin = new Padding(0)
+            }, 0, 0);
+            header.Controls.Add(new Label
+            {
+                Text = "自研节点、脚本与小工具。",
+                Dock = DockStyle.Fill,
+                Font = new Font(UiTokens.UiFontFamily, UiTokens.BodyFontSize, FontStyle.Regular),
+                ForeColor = colors.Muted,
+                BackColor = colors.Background,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Margin = new Padding(0)
+            }, 0, 1);
+            header.Controls.Add(new Label
+            {
+                // 与手机端 "N 个项目 · 点击查看 GitHub" 对齐；下划线 + 强调色模仿可点击样式
+                Text = $"{Projects.Length} 个项目 · 点击查看 GitHub",
+                Dock = DockStyle.Fill,
+                Font = new Font(UiTokens.UiFontFamily, UiTokens.BodyFontSize, FontStyle.Bold),
+                ForeColor = headerAccent,
+                BackColor = colors.Background,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Margin = new Padding(0)
+            }, 0, 2);
             _root.Controls.Add(header, 0, 0);
 
             _scrollBody.Dock = DockStyle.Fill;
             _scrollBody.AutoScroll = true;
             _scrollBody.BackColor = colors.Background;
 
-            // 单列卡片：用 TableLayoutPanel（支持 Margin 间距）替代 Dock=Top 直接堆叠——
-            // Dock=Top 布局会忽略 Margin，导致卡片之间没有间距、贴在一起。
-            // TableLayoutPanel 的坑：RowCount 初始为 0，直接 Add(col,row) 传绝对行号即可，
-            // 面板会自动扩展行数；不要用 RowCount-1 之类先减后加的写法。
-            var cardList = new TableLayoutPanel
+            // 单列卡片流：与手机端 LazyVerticalGrid(columns = 1) 一致
+            _cardList.Dock = DockStyle.Top;
+            _cardList.AutoSize = true;
+            _cardList.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            _cardList.ColumnCount = 1;
+            _cardList.RowCount = Projects.Length;
+            _cardList.BackColor = colors.Background;
+            _cardList.Padding = new Padding(0);
+            _cardList.Margin = new Padding(0);
+            for (var row = 0; row < Projects.Length; row++)
             {
-                Dock = DockStyle.Top,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                ColumnCount = 1,
-                BackColor = colors.Background,
-                Padding = new Padding(0),
-                Margin = new Padding(0)
-            };
-            cardList.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+                _cardList.RowStyles.Add(new RowStyle(SizeType.Absolute, CardHeight + (row == Projects.Length - 1 ? 0 : CardGap)));
+            }
             for (var i = 0; i < Projects.Length; i++)
             {
                 var card = BuildCard(Projects[i], i);
-                card.Dock = DockStyle.Fill;
-                card.Margin = new Padding(0, 0, 0, 18); // 卡片间距（TableLayout 中生效）
-                cardList.Controls.Add(card, 0, i);
+                card.Dock = DockStyle.Top;
+                card.Margin = new Padding(0, 0, 0, i == Projects.Length - 1 ? 0 : CardGap);
+                _cardList.Controls.Add(card, 0, i);
             }
-            _scrollBody.Controls.Add(cardList);
+            _scrollBody.Controls.Add(_cardList);
 
             _root.Controls.Add(_scrollBody, 0, 1);
             Controls.Add(_root);
@@ -132,138 +218,297 @@ namespace TapRelay
         {
             var colors = Palette.Create(_darkMode);
             var tone = colors.Tones[index % colors.Tones.Length];
-            // 统一高度：2/3 标签都留足空间，避免底栏与标签重叠。
-            const int cardHeight = 152;
-
             var card = new Panel
             {
-                Height = cardHeight,
-                Margin = new Padding(0, 0, 0, 12),
-                Cursor = Cursors.Hand,
-                BackColor = colors.Panel
+                Height = CardHeight,
+                BackColor = colors.Panel,
+                TabStop = false
             };
-            // 悬停反馈：阴影加深（对齐素言 hover:-translate-y-1 的层级感）。
-            // 注意不能移动 card.Top——在 Dock/TableLayout 布局中会被打回且破坏定位。
             var hovered = false;
             card.MouseEnter += (_, __) => { hovered = true; card.Invalidate(); };
             card.MouseLeave += (_, __) => { hovered = false; card.Invalidate(); };
 
-            // 圆角描边 + 阴影 + 头部色带 + 内容 + 标签 + 底栏，整体自绘。
-            card.Paint += (s, e) =>
+            var openButton = new CardActionButton(CardActionButton.Glyph.Open, CardActionButton.StyleKind.Primary, "直达");
+            var copyButton = new CardActionButton(CardActionButton.Glyph.Copy, CardActionButton.StyleKind.Secondary, "复制");
+            openButton.ApplyColors(tone.Foreground, tone.Border, tone.Header, colors.Panel);
+            copyButton.ApplyColors(tone.Foreground, tone.Border, tone.Header, colors.Panel);
+            _toolTip.SetToolTip(openButton, "打开 GitHub 项目");
+            _toolTip.SetToolTip(copyButton, "复制项目地址");
+            openButton.Click += (_, __) => OpenProject(project.Url, project.Title, openButton);
+            copyButton.Click += (_, __) => CopyProjectAddress(project.Url, project.Title, copyButton);
+            card.Controls.Add(copyButton);
+            card.Controls.Add(openButton);
+
+            void LayoutActions()
+            {
+                var right = Math.Max(0, card.ClientSize.Width - 16);
+                copyButton.Size = copyButton.GetPreferredSize(Size.Empty);
+                copyButton.Location = new Point(right - copyButton.Width, CardHeight - ActionButtonHeight - 12);
+                openButton.Size = openButton.GetPreferredSize(Size.Empty);
+                openButton.Location = new Point(copyButton.Left - 8 - openButton.Width, CardHeight - ActionButtonHeight - 12);
+            }
+            card.Resize += (_, __) => LayoutActions();
+            LayoutActions();
+
+            // 卡内布局的纵向坐标常量（与手机端 PersonalProjectCard 的 spacing 对齐）
+            // 手机端正文区 Column(padding start/end 16, top 14, bottom 12; spacedBy 14)：
+            //   分隔线 → +14 描述(2 行 36) → +14 标签(18) → +14 分隔线 → +14 按钮(32) → +12 底距
+            const float DescriptionTopOffset = CardHeaderHeight + 15;     // 分隔线 1 + 14
+            const float DescriptionHeight = 36;
+            const float TagTopOffset = CardHeaderHeight + 65;             // 描述下沿 + 14
+            const float TagHeight = 18;                                   // 手机端 10.sp 文字 + 上下 1.dp + 1.dp 描边
+            const float Divider2Y = CardHeaderHeight + 98;                // 标签下沿 + 14
+            // 按钮的纵向位置不在这里：它是真实子控件，位置由上面的 LayoutActions() 决定，
+            // 两者必须一致（CardHeight - ActionButtonHeight - 12）。
+
+            card.Paint += (_, e) =>
             {
                 var g = e.Graphics;
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+                var rect = new Rectangle(1, 1, Math.Max(1, card.Width - 3), Math.Max(1, card.Height - 3));
 
-                var rect = new Rectangle(1, 1, card.Width - 3, card.Height - 3);
-
-                // 卡片底（panel）+ 1px 描边（tone 色），对齐 rounded-xl + border。
-                using (var path = RoundedRect(rect, 12))
-                using (var shadowPath = RoundedRect(new Rectangle(3, 4, card.Width - 6, card.Height - 5), 12))
+                using (var path = RoundedRect(rect, CardCornerRadius))
+                using (var shadowPath = RoundedRect(new Rectangle(2, 3, Math.Max(1, card.Width - 5), Math.Max(1, card.Height - 4)), CardCornerRadius))
                 using (var bg = new SolidBrush(colors.Panel))
                 using (var borderPen = new Pen(hovered ? tone.Foreground : tone.Border, 1f))
                 using (var shadowBrush = new SolidBrush(hovered ? colors.ShadowHover : colors.Shadow))
                 {
-                    g.FillPath(shadowBrush, shadowPath); // 底部投影（shadow-sm）
+                    g.FillPath(shadowBrush, shadowPath);
                     g.FillPath(bg, path);
                     g.DrawPath(borderPen, path);
                 }
 
-                // ---- Header：主题色带（solid）----
-                var headerRect = new Rectangle(rect.X + 1, rect.Y + 1, rect.Width - 2, 44);
-                using (var headerPath = RoundedRectTop(headerRect, 12))
+                // 头部条带（圆角顶部，tone.Header 填色）
+                var headerRect = new Rectangle(rect.X + 1, rect.Y + 1, rect.Width - 2, CardHeaderHeight);
+                using (var headerPath = RoundedRectTop(headerRect, CardCornerRadius))
                 using (var headerBrush = new SolidBrush(tone.Header))
                 {
                     g.FillPath(headerBrush, headerPath);
                 }
-                // header 底部描边（border-b）
-                using (var linePen = new Pen(tone.Border, 1f))
-                {
-                    g.DrawLine(linePen, rect.X + 12, headerRect.Bottom, rect.Right - 12, headerRect.Bottom);
-                }
-                // 左侧 4px accent 条（对齐素言卡片头左侧色条）
+
+                // 左侧 accent 条：手机端是 4.dp × 34.dp、圆角 2.dp、位于 header 左右内边距 14.dp 处，
+                // 上下各留 11.dp 内边距——所以头部才有 56 那么高。
                 using (var accentBrush = new SolidBrush(tone.Border))
+                using (var accentPath = RoundedRect(
+                    new RectangleF(rect.X + 14, headerRect.Y + 11, 4, 34), 2))
                 {
-                    g.FillRectangle(accentBrush, rect.X + 14, headerRect.Y + 11, 4, 22);
+                    g.FillPath(accentBrush, accentPath);
                 }
 
-                // 标题
+                // 标题（粗体）
                 using (var titleBrush = new SolidBrush(tone.Foreground))
+                using (var titleFont = new Font(UiTokens.UiFontFamily, 11.5F, FontStyle.Bold))
+                using (var titleFormat = new StringFormat
                 {
-                    g.DrawString(project.Title, new Font("Microsoft YaHei UI", 10F, FontStyle.Bold),
-                        titleBrush, new RectangleF(rect.X + 26, headerRect.Y + 11, rect.Width - 120, 20));
-                }
-                // GitHub 图标（右侧，简单绘制）
-                using (var iconPen = new Pen(tone.ForegroundDim, 1.4f))
+                    Trimming = StringTrimming.EllipsisCharacter,
+                    FormatFlags = StringFormatFlags.NoWrap
+                })
                 {
-                    var ix = rect.Right - 34;
-                    var iy = headerRect.Y + 13;
-                    g.DrawEllipse(iconPen, ix, iy, 18, 18);       // 猫头
-                    g.DrawArc(iconPen, ix - 3, iy + 12, 10, 10, 180, 180);
-                    g.DrawArc(iconPen, ix + 11, iy + 12, 10, 10, 0, 180);
+                    // 手机端：accent 条后 10.dp 间距才开始标题，且在 56 高的 header 里垂直居中
+                    var titleRect = new RectangleF(rect.X + 28, headerRect.Y + 17,
+                        Math.Max(80, headerRect.Width - 68), 22);
+                    g.DrawString(project.Title, titleFont, titleBrush, titleRect, titleFormat);
                 }
 
-                // ---- 描述（内容区）----
+                // 右上 GitHub 图标：手机端是 18.dp、距右 14.dp、tone.foreground alpha 0.8，这里完全对齐
+                DrawGitHubMark(g, Color.FromArgb(204, tone.Foreground),
+                    headerRect.Right - 32, headerRect.Y + 19, 18);
+
+                // 头部下方分隔线（手机端 HorizontalDivider 是通栏的，不内缩）
+                using (var divPen = new Pen(tone.Border, 1f))
+                {
+                    g.DrawLine(divPen, rect.X, headerRect.Bottom, rect.Right, headerRect.Bottom);
+                }
+
+                // 描述（双行省略）
                 using (var descBrush = new SolidBrush(colors.Muted))
+                using (var descFont = new Font(UiTokens.UiFontFamily, UiTokens.CaptionFontSize + 0.5F))
+                using (var descFormat = new StringFormat
                 {
-                    g.DrawString(project.Description, new Font("Microsoft YaHei UI", 9F),
-                        descBrush, new RectangleF(rect.X + 18, headerRect.Bottom + 12, rect.Width - 36, 34));
+                    Trimming = StringTrimming.EllipsisCharacter,
+                    FormatFlags = StringFormatFlags.LineLimit
+                })
+                {
+                    g.DrawString(project.Description, descFont, descBrush,
+                        new RectangleF(rect.X + 16, rect.Y + DescriptionTopOffset, rect.Width - 32, DescriptionHeight),
+                        descFormat);
                 }
 
-                // ---- 胶囊标签 ----
-                var tagFont = new Font("Microsoft YaHei UI", 8F);
-                float tx = rect.X + 18;
-                var ty = headerRect.Bottom + 44f;
-                foreach (var tag in project.Tags)
+                // 胶囊形标签（单行，超出截断）
+                using (var tagFont = new Font(UiTokens.UiFontFamily, 8F))
                 {
-                    var tagSize = g.MeasureString(tag, tagFont);
-                    var tagRect = new RectangleF(tx, ty, tagSize.Width + 16, 20);
-                    using (var tagPath = RoundedRect(tagRect, 10))
-                    using (var tagBrush = new SolidBrush(tone.Tag))
-                    using (var tagBorder = new Pen(tone.Border, 1f))
-                    using (var tagText = new SolidBrush(tone.Foreground))
+                    float tx = rect.X + 16;
+                    var ty = rect.Y + TagTopOffset;
+                    foreach (var tag in project.Tags)
                     {
-                        g.FillPath(tagBrush, tagPath);
-                        g.DrawPath(tagBorder, tagPath);
-                        g.DrawString(tag, tagFont, tagText, new PointF(tx + 8, ty + 3));
-                    }
-                    tx += tagRect.Width + 8;
-                }
-
-                // ---- 底栏（border-t + 复制按钮）----
-                var footerY = rect.Bottom - 34;
-                using (var linePen = new Pen(tone.Border, 1f))
-                {
-                    g.DrawLine(linePen, rect.X + 12, footerY, rect.Right - 12, footerY);
-                }
-                // 复制按钮（底栏右侧，hover 态由外层按钮处理）
-                using (var copyBrush = new SolidBrush(tone.Header))
-                using (var copyBorder = new Pen(tone.Border, 1f))
-                using (var copyText = new SolidBrush(tone.Foreground))
-                {
-                    var copyRect = new RectangleF(rect.Right - 96, footerY + 4, 76, 24);
-                    using (var copyPath = RoundedRect(copyRect, 6))
-                    {
-                        g.FillPath(copyBrush, copyPath);
-                        g.DrawPath(copyBorder, copyPath);
-                        g.DrawString("复制地址", new Font("Microsoft YaHei UI", 8F), copyText,
-                            new PointF(copyRect.X + 16, copyRect.Y + 4));
+                        var tagSize = g.MeasureString(tag, tagFont);
+                        var tagRect = new RectangleF(tx, ty, tagSize.Width + 14, TagHeight);
+                        if (tagRect.Right > rect.Right - 16)
+                        {
+                            break;
+                        }
+                        using (var tagPath = RoundedRect(tagRect, 9))
+                        using (var tagBrush = new SolidBrush(tone.Tag))
+                        using (var tagBorder = new Pen(tone.Border, 1f))
+                        using (var tagText = new SolidBrush(tone.Foreground))
+                        {
+                            g.FillPath(tagBrush, tagPath);
+                            g.DrawPath(tagBorder, tagPath);
+                            g.DrawString(tag, tagFont, tagText, new PointF(tx + 7, ty + 3));
+                        }
+                        tx += tagRect.Width + 4;   // 手机端标签间距 4.dp
                     }
                 }
-            };
 
-            card.Click += (s, e) =>
-            {
-                try
+                // 按钮上方的分隔线（对齐手机端 tags 与 buttons 之间的 border-t）
+                using (var divPen = new Pen(tone.Border, 1f))
                 {
-                    Process.Start(new ProcessStartInfo(project.Url) { UseShellExecute = true });
-                }
-                catch (Exception)
-                {
+                    g.DrawLine(divPen, rect.X, rect.Y + Divider2Y, rect.Right, rect.Y + Divider2Y);
                 }
             };
 
             return card;
+        }
+
+        private void OpenProject(string url, string title, Control anchor)
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            }
+            catch (Exception)
+            {
+                ShowTransientTip(anchor, $"无法打开 {title}，请检查浏览器");
+            }
+        }
+
+        private void CopyProjectAddress(string url, string title, Control anchor)
+        {
+            try
+            {
+                Clipboard.SetText(url);
+                anchor.Focus();
+                ShowTransientTip(anchor, $"已复制 {title} 地址");
+            }
+            catch (Exception)
+            {
+                ShowTransientTip(anchor, "复制失败，请重试");
+            }
+        }
+
+        /// <summary>
+        /// 手机端这两个操作都有明确反馈：打开失败显示「无法打开 X，请检查浏览器。」（Danger 色），
+        /// 复制成功弹 Toast「已复制 X 地址」。PC 端原先两个 catch 都是空实现，点了完全没反应，
+        /// 用户无法判断成功还是失败。这里用按钮下方的短暂气泡做等价反馈——
+        /// 刻意不用 MessageBox：模态弹窗会打断连续浏览多个项目的操作。
+        /// </summary>
+        private void ShowTransientTip(Control anchor, string message)
+        {
+            _toolTip.Show(message, anchor, new Point(anchor.Width / 2, anchor.Height + 6), 1800);
+        }
+
+        /// <summary>
+        /// 卡片右上角的 GitHub 标记：与手机端 <c>GITHUB_MARK_PATH</c> 逐字符一致（24×24 viewport 线稿）。
+        /// 早先这里用的是抽象 tree-glyph，与手机端的 Octocat 轮廓不是一回事；改为直接解析
+        /// 手机端的 pathData，避免手工翻译造成两端漂移。
+        /// </summary>
+        private static void DrawGitHubMark(Graphics g, Color color, float x, float y, float size)
+        {
+            const float viewport = 24f;
+            const float strokeInViewport = 1.5f;   // 手机端 strokeLineWidth = 1.5f
+            var scale = size / viewport;
+
+            using var path = BuildSvgPath(GitHubMarkPath);
+            // 先缩放后平移：GDI+ 行向量约定下 [s 0 0 s dx dy] 即 x' = s*x + dx。
+            using var matrix = new Matrix(scale, 0f, 0f, scale, x, y);
+            path.Transform(matrix);
+
+            using var pen = new Pen(color, strokeInViewport * scale)
+            {
+                StartCap = LineCap.Round,
+                EndCap = LineCap.Round,
+                LineJoin = LineJoin.Round
+            };
+            g.DrawPath(pen, path);
+        }
+
+        /// <summary>
+        /// 精简 SVG path 解析：支持本项目图标使用的 M / L / C / Z（绝对坐标）。
+        /// 存在的意义是让 PC 端图标能与手机端 ImageVector 的 pathData 共用同一份字符串，
+        /// 而不是各写一份几何代码——后者必然随时间漂移。
+        /// </summary>
+        private static GraphicsPath BuildSvgPath(string pathData)
+        {
+            var path = new GraphicsPath();
+            var tokens = Regex.Matches(pathData, @"[MLCZ]|-?\d*\.?\d+");
+            var index = 0;
+
+            float Next()
+            {
+                if (index >= tokens.Count) throw new FormatException("SVG path ended mid-command.");
+                return float.Parse(tokens[index++].Value, CultureInfo.InvariantCulture);
+            }
+
+            var current = PointF.Empty;
+            while (index < tokens.Count)
+            {
+                switch (tokens[index++].Value)
+                {
+                    case "M":
+                        // SVG 的 M 是新子路径；如果不显式 StartFigure，GDI+ 可能把多个
+                        // M/C/L 片段接成一条线，产生手机端没有的横向连线。
+                        path.StartFigure();
+                        current = new PointF(Next(), Next());
+                        break;
+                    case "L":
+                        current = AddLine(path, current, new PointF(Next(), Next()));
+                        break;
+                    case "C":
+                        // 手机端把连续贝塞尔写成一条 C 后跟多组坐标，这里要一直读到下一个命令。
+                        while (index < tokens.Count && !IsSvgCommand(tokens[index].Value))
+                        {
+                            var c1 = new PointF(Next(), Next());
+                            var c2 = new PointF(Next(), Next());
+                            var end = new PointF(Next(), Next());
+                            path.AddBezier(current, c1, c2, end);
+                            current = end;
+                        }
+                        break;
+                    case "Z":
+                        path.CloseFigure();
+                        break;
+                }
+            }
+            return path;
+        }
+
+        private static bool IsSvgCommand(string token)
+        {
+            return token == "M" || token == "L" || token == "C" || token == "Z";
+        }
+
+        private static PointF AddLine(GraphicsPath path, PointF from, PointF to)
+        {
+            path.AddLine(from, to);
+            return to;
+        }
+
+        private static void DrawLineIcon(Graphics g, Color color, string pathData, RectangleF rect)
+        {
+            const float viewport = 24f;
+            const float strokeInViewport = 1.5f;   // 手机端 pixGoLineIcon.strokeLineWidth
+            var scale = rect.Width / viewport;
+            using var path = BuildSvgPath(pathData);
+            using var matrix = new Matrix(scale, 0f, 0f, scale, rect.Left, rect.Top);
+            path.Transform(matrix);
+            using var pen = new Pen(color, strokeInViewport * scale)
+            {
+                StartCap = LineCap.Round,
+                EndCap = LineCap.Round,
+                LineJoin = LineJoin.Round
+            };
+            g.DrawPath(pen, path);
         }
 
         private static GraphicsPath RoundedRect(RectangleF rect, float radius)
@@ -287,6 +532,179 @@ namespace TapRelay
             path.AddLine(rect.Right, rect.Bottom, rect.X, rect.Bottom);
             path.CloseFigure();
             return path;
+        }
+
+        /// <summary>
+        /// 卡片底部的「直达」/「复制」按钮：圆角矩形 + 图标 + 文字。
+        ///
+        /// 故意不走 UiButtonStyler 入口：那个入口是为了「全应用统一品牌绿主按钮」，
+        /// 这里的按钮必须随卡片主题色着色（tone.Foreground 实心 / tone.Tag 描边），
+        /// 与手机端 PersonalProjectsDialog 的 per-card 主题按钮对齐；
+        /// 走 UiButtonStyler 会把所有卡片的主按钮都染成同一抹绿，破坏视觉一致性。
+        /// </summary>
+        private sealed class CardActionButton : Control
+        {
+            internal enum Glyph
+            {
+                Open,
+                Copy
+            }
+
+            internal enum StyleKind
+            {
+                Primary,
+                Secondary
+            }
+
+            private const float IconSize = 13F;
+            private const float IconTextGap = 5F;
+            private const float BorderWidth = 1F;
+
+            private readonly Glyph _glyph;
+            private readonly StyleKind _style;
+            private readonly string _text;
+            private readonly Font _font;
+
+            private Color _foreground = Color.Black;
+            private Color _border = Color.Gray;
+            private Color _surface = Color.White;      // 主按钮的文字/图标色 = 手机端 tone.header
+            private Color _panel = Color.White;        // 次按钮的底色 = 手机端 Surface（卡片底色）
+            private Color _hoverSurface = Color.LightGray;
+            private bool _hovered;
+            private bool _focused;
+            private bool _pressed;
+
+            internal CardActionButton(Glyph glyph, StyleKind style, string text)
+            {
+                _glyph = glyph;
+                _style = style;
+                _text = text;
+                AccessibleRole = AccessibleRole.PushButton;
+                AccessibleName = text;
+                TabStop = true;
+                Cursor = Cursors.Hand;
+                _font = new Font(
+                    UiTokens.UiFontFamily,
+                    10F,
+                    style == StyleKind.Primary ? FontStyle.Bold : FontStyle.Regular);
+                SetStyle(
+                    ControlStyles.UserPaint |
+                    ControlStyles.AllPaintingInWmPaint |
+                    ControlStyles.OptimizedDoubleBuffer |
+                    ControlStyles.ResizeRedraw |
+                    ControlStyles.SupportsTransparentBackColor,
+                    true);
+                MouseEnter += (_, __) => { _hovered = true; Invalidate(); };
+                MouseLeave += (_, __) => { _hovered = false; _pressed = false; Invalidate(); };
+                MouseDown += (_, __) => { if (ClientRectangle.Contains(PointToClient(MousePosition))) { _pressed = true; Invalidate(); } };
+                MouseUp += (_, __) => { _pressed = false; Invalidate(); };
+                GotFocus += (_, __) => { _focused = true; Invalidate(); };
+                LostFocus += (_, __) => { _focused = false; Invalidate(); };
+            }
+
+            /// <summary>
+            /// 对齐手机端两套按钮的配色规则：
+            ///   直达（Primary）  containerColor = tone.foreground，contentColor = tone.header
+            ///   复制（Secondary）containerColor = Surface（卡片底色），contentColor = tone.foreground
+            /// 注意主按钮的内容色是 tone.header 而不是白色——深色主题下 tone.foreground 是浅色，
+            /// 白字会糊成一片；这正是之前用 Color.White 的问题。
+            /// </summary>
+            internal void ApplyColors(Color foreground, Color border, Color header, Color panel)
+            {
+                _foreground = foreground;
+                _border = border;
+                _surface = header;
+                _panel = panel;
+                _hoverSurface = ControlPaint.Light(panel, 0.06f);
+                Invalidate();
+            }
+
+            public override Size GetPreferredSize(Size proposedSize)
+            {
+                var textSize = TextRenderer.MeasureText(_text, _font);
+                var w = ActionButtonPaddingX * 2 + IconSize + IconTextGap + textSize.Width;
+                return new Size((int)Math.Ceiling(w), ActionButtonHeight);
+            }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                base.OnPaint(e);
+                var g = e.Graphics;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.PixelOffsetMode = PixelOffsetMode.Half;
+                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+
+                var rect = new RectangleF(
+                    BorderWidth / 2f,
+                    BorderWidth / 2f,
+                    Math.Max(1, Width - BorderWidth),
+                    Math.Max(1, Height - BorderWidth));
+
+                // 背景与边框
+                Color bg;
+                Color borderColor;
+                Color textColor;
+                bool drawBorder;
+                if (_style == StyleKind.Primary)
+                {
+                    bg = _hovered ? ControlPaint.Dark(_foreground, 0.08f)
+                        : _focused ? ControlPaint.Dark(_foreground, 0.05f)
+                        : _foreground;
+                    borderColor = bg;
+                    drawBorder = false;
+                    textColor = _surface;      // 手机端 contentColor = tone.header
+                }
+                else
+                {
+                    bg = _pressed ? ControlPaint.Dark(_panel, 0.06f)
+                        : _hovered ? _hoverSurface
+                        : _focused ? _hoverSurface
+                        : _panel;              // 手机端 containerColor = Surface
+                    borderColor = _border;
+                    drawBorder = true;
+                    textColor = _foreground;
+                }
+
+                using (var path = RoundedRect(rect, UiTokens.ButtonRadius))
+                using (var bgBrush = new SolidBrush(bg))
+                {
+                    g.FillPath(bgBrush, path);
+                    if (drawBorder)
+                    {
+                        using var borderPen = new Pen(borderColor, BorderWidth);
+                        g.DrawPath(borderPen, path);
+                    }
+                }
+
+                // 图标 + 文字（水平居中）
+                var textSize = g.MeasureString(_text, _font);
+                var totalW = IconSize + IconTextGap + textSize.Width;
+                var startX = (Width - totalW) / 2f;
+                var iconY = (Height - IconSize) / 2f;
+                var textY = (Height - textSize.Height) / 2f;
+
+                using (var textBrush = new SolidBrush(textColor))
+                {
+                    var iconRect = new RectangleF(startX, iconY, IconSize, IconSize);
+                    // 手机端 ExternalLinkIcon / GlobeIcon 都是 24×24、1.5px 圆角线稿；
+                    // 这里用同一份 pathData，而不是近似的手绘框线。
+                    DrawLineIcon(g, textColor,
+                        _glyph == Glyph.Open ? ExternalLinkPath : GlobePath,
+                        iconRect);
+                    g.DrawString(_text, _font, textBrush, new PointF(startX + IconSize + IconTextGap, textY));
+                }
+            }
+
+            protected override void OnKeyDown(KeyEventArgs e)
+            {
+                if (e.KeyCode == Keys.Enter || e.KeyCode == Keys.Space)
+                {
+                    OnClick(EventArgs.Empty);
+                    e.Handled = true;
+                    return;
+                }
+                base.OnKeyDown(e);
+            }
         }
 
         private sealed class PersonalProject
@@ -324,7 +742,7 @@ namespace TapRelay
             public Color Shadow { get; set; }
             public Color ShadowHover { get; set; }
             public Color TextPrimary { get; set; }
-            public CardTone[] Tones { get; set; }
+            public CardTone[] Tones { get; set; } = Array.Empty<CardTone>();
 
             public static Palette Create(bool dark) => dark ? Dark : Light;
 

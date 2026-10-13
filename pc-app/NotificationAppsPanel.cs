@@ -1098,13 +1098,13 @@ namespace TapRelay
                 case "comfyui":
                     return TryFindComfyUiInstallRoot(userProfile, programFiles, out installRoot);
                 case "leigod":
+                    // 雷神可装在任意盘（本机实测 F:\Program Files (x86)\LeiGod_Acc），
+                    // 固定 %PROGRAMFILES(X86)% 路径在 F 盘安装时够不着；改用与
+                    // WorkBuddy AI 相同的证据链：进程 → 可信根 exe → 卸载注册表
+                    // （InstallLocation/DisplayIcon 附文件校验，不限盘符）。
                     return AdaptedProcessGate.IsAnyProcessRunning(new[] { "LeiGod", "leigod" }) ||
-                           TryExecutableRoot(
-                               Environment.ExpandEnvironmentVariables(@"%PROGRAMFILES(X86)%\LeiGod_Acc"),
-                               out installRoot, "leigod.exe", "LeiGod.exe") ||
-                           TryExecutableRoot(
-                               AppInstallRoots.Get(key),
-                               out installRoot, "leigod.exe", "LeiGod.exe");
+                           TryFindDesktopInstallRoot(key, userProfile, appData, localAppData,
+                               programFiles, out installRoot, "LeiGod", "雷神加速器");
                 default:
                     // 自定义应用也必须有当前可执行文件；仅剩一个卸载后的空目录
                     // 或注册表元数据不能继续显示为“已安装”。无签名约束，不拦截。

@@ -53,11 +53,20 @@ namespace TapRelay
         };
         private readonly NotifyServer _server;
         private readonly Action<string> _log;
+        private readonly Action<string> _detailLog;
         private readonly Func<string, bool> _isSourceProcessRunning;
         private readonly object _gate = new object();
         private readonly Dictionary<string, FileState> _files = new Dictionary<string, FileState>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, bool> _traeSessionKinds = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _eventKeys = new HashSet<string>(StringComparer.Ordinal);
+        /// <summary>
+        /// 本次监控启动时刻。上下文压缩/会话恢复会把旧消息原样重新追加到转录末尾
+        /// （uuid、timestamp 都不变），而 <see cref="_eventKeys"/> 只在内存中存在，
+        /// PC 重启后为空，历史终态会被再次广播。追加区里时间戳早于启动时刻的记录
+        /// 只可能是重放，必须跳过。
+        /// </summary>
+        private DateTimeOffset _startedAtUtc;
+        private static readonly TimeSpan ReplayedTranscriptClockSkew = TimeSpan.FromMinutes(2);
         /// <summary>
         /// 正在等待用户处理的 WorkBuddy 会话（sessionId 级去重）。
         /// WorkBuddy 等待期间会周期轮询打印等待信号（旧格式 transition 行 turnSeq 递增、
@@ -102,6 +111,7 @@ namespace TapRelay
             _log = log ?? throw new ArgumentNullException(nameof(log));
             // 下游监视器的轮询细节只写诊断文件，首页只保留任务事件。
             detailLog ??= log;
+            _detailLog = detailLog;
             _isSourceProcessRunning = isSourceProcessRunning ?? AdaptedProcessGate.IsRunningForSource;
             _readTraeToast = readTraeToast ?? ReadTraeToast;
             _baiduNetdiskMonitor = new BaiduNetdiskBatchMonitor(DispatchBaiduBatch, _log);
@@ -123,6 +133,7 @@ namespace TapRelay
                 }
 
                 _started = true;
+                _startedAtUtc = DateTimeOffset.UtcNow;
                 EnsureWatchersLocked();
                 PrimeExistingFiles();
                 foreach (var watcher in _watchers)
@@ -917,6 +928,12 @@ namespace TapRelay
                     return;
                 }
 
+                if (IsReplayedTranscriptEvent(
+                        FirstNonEmpty(ReadString(root, "timestamp"), ReadString(root, "stop_time"))))
+                {
+                    return;
+                }
+
                 string message;
                 string rememberedSessionIdOfficial;
                 string rememberedCwdOfficial;
@@ -1133,6 +1150,11 @@ namespace TapRelay
                 AgentLogPaths.GetUserProfileRoot());
             cwd = FirstNonEmpty(cwd, rememberedCwd);
             var timestamp = FirstNonEmpty(ReadString(root, "timestamp"), ReadString(root, "stop_time"));
+            if (IsReplayedTranscriptEvent(timestamp))
+            {
+                return;
+            }
+
             if (string.IsNullOrWhiteSpace(taskId))
             {
                 taskId = BuildClaudeEventId(sessionId, message, timestamp, path);
@@ -2080,6 +2102,36 @@ namespace TapRelay
                    path.IndexOf("TraeWork CN", StringComparison.OrdinalIgnoreCase) >= 0
                 ? "traework"
                 : "trae";
+        }
+
+        /// <summary>
+        /// Claude 转录在上下文压缩或会话恢复时会把旧行重新追加到文件末尾，时间戳仍是
+        /// 事件发生时的旧值。文件基线只负责启动瞬间，内存去重又随进程重启丢失，因此
+        /// 追加区里早于本次启动的记录必须按重放丢弃，否则会把已通知过的完成再推一次。
+        /// </summary>
+        private bool IsReplayedTranscriptEvent(string timestamp)
+        {
+            if (string.IsNullOrWhiteSpace(timestamp))
+            {
+                return false;
+            }
+
+            if (!DateTimeOffset.TryParse(
+                    timestamp,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.AssumeUniversal,
+                    out var eventTime))
+            {
+                return false;
+            }
+
+            if (eventTime.ToUniversalTime() >= _startedAtUtc - ReplayedTranscriptClockSkew)
+            {
+                return false;
+            }
+
+            _detailLog("忽略 Claude 转录重放事件：事件时间 " + timestamp + " 早于本次监控启动");
+            return true;
         }
 
         private static DateTimeOffset? TryReadLogEventTimeUtc(string line)

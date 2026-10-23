@@ -6,10 +6,11 @@
 ## 规则条目
 
 ### R1: 规则读取顺序
-**断言**：任何 AI Coder 在新增、修改或删除项目文件前，必须先读取 `W:\TapRelay\CLAUDE.md`，再读取本文件列出的相关编号规则文件；若入口文件与编号规则文件冲突，以编号规则文件为准。
+**断言**：任何 AI Coder 在新增、修改或删除项目文件前，必须先读取 `W:\TapRelay\AGENTS.md` 和 `W:\TapRelay\CLAUDE.md`，再读取本文件列出的相关编号规则文件；若入口文件与编号规则文件冲突，以编号规则文件为准。
 **示例**：
 ```text
 必须读取:
+W:\TapRelay\AGENTS.md
 W:\TapRelay\CLAUDE.md
 W:\TapRelay\01-人设与开发准则.md
 W:\TapRelay\02-技术栈与核心库.md
@@ -34,10 +35,10 @@ W:\TapRelay\09-问题与优化记录.md（目录）
 W:\TapRelay\09-问题与优化记录-内容.md（按目录主题读取）
 W:\TapRelay\11-应用识别与适配规则.md
 ```
-**违规特征**：未读取相关编号规则文件就改动 `pc-app/`、`notify-server/`、`android-app/` 或 `.zcode/`；在规则冲突时按 `CLAUDE.md` 覆盖编号文件；排障时跳过 `09-问题与优化记录.md` 目录和 `09-问题与优化记录-内容.md` 对应主题，直接重新定位已收录的问题。
+**违规特征**：未读取两个规则入口和相关编号规则文件就改动 `pc-app/`、`notify-server/`、`android-app/` 或 `.zcode/`；在规则冲突时按 `CLAUDE.md` 覆盖编号文件；排障时跳过 `09-问题与优化记录.md` 目录和 `09-问题与优化记录-内容.md` 对应主题，直接重新定位已收录的问题。
 
 ### R2: 规则文件索引
-**断言**：项目规则只允许维护在 `W:\TapRelay\CLAUDE.md` 与 `W:\TapRelay\NN-*.md` 编号文件中；不得把长期架构规则散落到源码注释、README 或临时聊天记录。
+**断言**：项目规则只允许维护在 `W:\TapRelay\AGENTS.md`、`W:\TapRelay\CLAUDE.md` 与 `W:\TapRelay\NN-*.md` 编号文件中；不得把长期架构规则散落到源码注释、README 或临时聊天记录。
 **示例**：
 ```text
 W:\TapRelay\01-人设与开发准则.md
@@ -73,10 +74,12 @@ W:\TapRelay\notify-phone.md
 **违规特征**：直接在根目录放置 `server.js`、`package.json`、`MainActivity.kt` 或临时脚本作为正式实现。
 
 ### R4: 业务目标不可变
-**断言**：本项目只实现”PC 上 Agent 任务完成后，在同一局域网内推送通知到 Android 手机”；不得把产品范围扩展为公网消息平台、多人账号系统或云端推送服务。
+**断言**：本项目的核心业务是“PC 上 Agent 任务完成后，在同一局域网内推送通知到 Android 手机”。经用户明确要求，另包含 ComfyUI 手机工作流控制功能；除此以外不得把产品范围扩展为公网消息平台、多人账号系统或云端推送服务。
 **示例**：
 ```text
 固定业务链路:
 Agent/ChatGPT/ZCode -> http://localhost:1122/send -> ws://<PC-LAN-IP>:1122 -> Android 系统通知
+Android ComfyUI 工作流操作 -> http://<PC-LAN-IP>:1122/comfy/* -> PC 本机回环控制台 -> ComfyUI
 ```
-**违规特征**：引入 Firebase Cloud Messaging、登录注册、云数据库、多租户控制台或公网反向代理作为默认路径。
+**用户明确的 ComfyUI 手机控制例外**：允许 Android 在现有 `1122` 页面内访问 `/comfy`，选择已配置的 API 工作流、填写参数、上传图片、提交运行并查看结果。`/comfy` 只代理到 PC 本机回环地址上的随 TapRelay 生命周期管理的控制台进程；不得新增手机可见端口、云服务或公网消息链路。控制台管理页 `/comfy/admin` 及 `/comfy/api/admin/*` 只允许 PC 本机回环请求。
+**违规特征**：引入 Firebase Cloud Messaging、登录注册、云数据库、多租户控制台或公网反向代理作为默认路径；为了 ComfyUI 另开 LAN 端口；把管理接口暴露给手机。

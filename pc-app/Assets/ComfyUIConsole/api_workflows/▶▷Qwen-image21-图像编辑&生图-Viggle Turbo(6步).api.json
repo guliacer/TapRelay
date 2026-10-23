@@ -1,0 +1,560 @@
+{
+  "4": {
+    "inputs": {
+      "aspect_ratio": "2:3 (Portrait Photo)",
+      "megapixels": 3,
+      "multiple": 32
+    },
+    "class_type": "ResolutionSelector",
+    "_meta": {
+      "title": "Resolution Selector"
+    }
+  },
+  "5": {
+    "inputs": {
+      "add_noise": true,
+      "noise_seed": [
+        "12",
+        0
+      ],
+      "cfg": 1,
+      "model": [
+        "67",
+        0
+      ],
+      "positive": [
+        "7",
+        0
+      ],
+      "negative": [
+        "7",
+        1
+      ],
+      "sampler": [
+        "14",
+        0
+      ],
+      "sigmas": [
+        "6",
+        0
+      ],
+      "latent_image": [
+        "9",
+        0
+      ]
+    },
+    "class_type": "SamplerCustom",
+    "_meta": {
+      "title": "SamplerCustom"
+    }
+  },
+  "6": {
+    "inputs": {
+      "nodes": "1.0, 0.9375, 0.875, 0.75, 0.5, 0.25",
+      "latent": [
+        "9",
+        0
+      ]
+    },
+    "class_type": "ViggleTurboSigmas",
+    "_meta": {
+      "title": "Qwen-Image-2.1 Viggle Turbo Sigmas"
+    }
+  },
+  "7": {
+    "inputs": {
+      "prompt": [
+        "66",
+        0
+      ],
+      "negative_prompt": "artifacts, gpt-image, washed-out colors, low quality, low resolution, AI slop, deviantart, sloppy lines, rough sketch, blurry, indistinct, missing fingers, badly drawn hands, wrong number of fingers，缺少身体肢体",
+      "resolution": 0,
+      "clip": [
+        "11",
+        0
+      ]
+    },
+    "class_type": "TextEncodeQwenImage21",
+    "_meta": {
+      "title": "Text Encode Qwen Image 2.1"
+    }
+  },
+  "8": {
+    "inputs": {
+      "samples": [
+        "5",
+        0
+      ],
+      "vae": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "9": {
+    "inputs": {
+      "width": [
+        "4",
+        0
+      ],
+      "height": [
+        "4",
+        1
+      ],
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent Image"
+    }
+  },
+  "10": {
+    "inputs": {
+      "vae_name": "qwen\\qwen_image_2.1_vae_bf16.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "11": {
+    "inputs": {
+      "clip_name": "qwen\\qwen3vl_8b_int8_convrot.safetensors",
+      "type": "qwen_image",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "12": {
+    "inputs": {
+      "seed": -1
+    },
+    "class_type": "Seed (rgthree)",
+    "_meta": {
+      "title": "Seed (rgthree)"
+    }
+  },
+  "13": {
+    "inputs": {
+      "unet_name": "qwen\\Qwen21-redqw21UNLOCKEDV2TI2I_redqw21UNLOCKEDV2_int8.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "14": {
+    "inputs": {
+      "sampler_name": "euler"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "KSamplerSelect"
+    }
+  },
+  "56": {
+    "inputs": {
+      "文件名前缀": "%date:yyyy_MM_dd%/Qwen2.1",
+      "格式": "JPEG",
+      "压缩模式": "civilblur",
+      "质量": 85,
+      "目标大小KB": 0,
+      "清除内存": true,
+      "图像": [
+        "82",
+        0
+      ]
+    },
+    "class_type": "GGImageCompressSave",
+    "_meta": {
+      "title": "GG 图像压缩保存"
+    }
+  },
+  "61": {
+    "inputs": {
+      "平台": "豆包",
+      "自定义网址": "",
+      "节点高度": 860
+    },
+    "class_type": "GGWebAIReverseImage",
+    "_meta": {
+      "title": "GG 网页AI图像反推"
+    }
+  },
+  "62": {
+    "inputs": {
+      "string_a": "秋日银杏前执扇仕女：凤凰刺绣立领衫 + 金冠流苏 + 海棠团扇 + 银杏散景\n\n【机位与相机】\n高端中式古风半身人像摄影，竖版 2:3 画幅。使用 Canon EOS R5 搭配 Canon RF 100mm F2.8L 百微镜头，机位与仕女视线齐平（0 度平视）、中近景取景，对焦锁定在仕女面部与胸前团扇，f/2.8 浅景深使背景黄色银杏叶呈重度奶油散景；仕女为画面中央的半身主体（半身入画、头至腰部，头顶位于画面垂直 25% 处、腰部与团扇下缘位于垂直 87% 处、占画面高度约 55%、水平正居中），团扇于胸前低位舒展，画面四角与上缘由虚化黄叶环绕，人物沉静凝望画面左方。\n\n【构图与定位】\n仕女为绝对主体（半身构图、正面朝向镜头）：发髻与头饰位于画面水平 50-67%、垂直 25-50% 区域（高髻圆润饱满）；面部位于画面水平 50-67%、垂直 37-62% 区域（双目望向画面左方、神情沉静）；肩部位于画面水平 33-83%、垂直 62-75% 区域；腰部位于画面水平 33-67%、垂直 75-87% 区域。海棠团扇为第二主体：扇面中心位于画面水平 50-67%、垂直 75-87% 区域（扇面顶缘恰好低于仕女下巴与颈部交界线、不遮挡面部，扇面宽约面部宽度的 2.2 倍、下缘延伸至画面下 1/8），执扇双手基本被扇面遮蔽、扇面正下方隐约露出 1 道白色衣袖边缘。发饰流苏垂落：4 缕金色流苏自金冠两侧垂至耳下（画面水平 42-58% 与 62-78%、垂直 50-62% 区域、末端金珠坠）。背景银杏叶布满画面四缘与上 1/2（垂直 0-50% 整宽、重度虚化），团扇与仕女白衣为画面中下部视觉焦点，画面上部与两侧黄叶散景合围。\n\n【主体几何积木】\n发型为高耸弧形发髻（黑发浓密光泽、髻体圆润隆起于头顶正上方）。头饰：1 件镂空金丝金冠（横跨发髻顶部、金丝编作花卉卷草纹）＋金冠上 6 支金簪（直插与斜插错落）＋金冠嵌红色宝石 3-4 颗、绿色宝石 2-3 颗、白色珠饰 5 颗以上（宝石仅这组、全画面唯一）＋金冠两侧 4 缕金色流苏步摇（左右各 2 缕、垂至耳下 1-2 厘米、末端各缀 1 颗金色小圆珠、共 4 缕）。妆容：眉目清雅、唇色红润。服装：米白色（暖象牙白调）立领衫（立领紧扣颈部、领缘极细金线滚边），衣面满身金银丝刺绣（胸前 1 只大型凤凰主纹（浅金为底、淡红花枝点缀）、肩背部散落花卉云纹、纹样疏密有致胸前肩部最密）；肩部披 1 层半透明薄纱（纱上隐现银色几何云纹）；袖口为米白素面丝绸＋边缘金色回纹绣＋红色花叶点缀。颈前 1 条金色项圈（镶红色宝石、与头饰宝石呼应、全画面唯一 1 条）。\n\n【团扇定形】\n团扇共 1 把（全画面唯一 1 把、共 1 把）：扇面为海棠形异形扇（边缘呈波浪花瓣状起伏、非正圆）、扇面底色暖杏黄色（橘调），扇面绘 1 组花卉图案（白色花朵数朵（花瓣尖端带粉、花蕊淡黄）、伴细长绿色枝条、花枝自扇面左下斜向右上伸展、仅这 1 组图案）；扇缘 1 圈银白色细窄金属包边（勾勒扇形轮廓）；扇柄位于扇面中央向下、被扇面与画面下缘遮蔽不可见；执扇方式为双手捧扇于胸前低位（手指被扇面完全遮挡、不露指）。\n\n【微件算术】\n团扇共 1 把（全画面唯一 1 把）；金冠共 1 件（全画面唯一 1 件）；金簪共 6 支（仅这 6 支）；流苏步摇共 4 缕（左右各 2 缕、每缕末端金珠坠共 4 颗、仅这 4 缕）；项圈共 1 条（全画面唯一 1 条）；凤凰刺绣共 1 只（仅胸前 1 只）；头饰宝石共 10 颗上下（红 3-4 + 绿 2-3 + 白 5、仅头饰与项圈位置出现）。\n\n【道具与支撑物】\n全画面无桌面与其他道具，唯一持物为胸前 1 把海棠团扇（已定形），扇下方无其他器物入画。\n\n【背景空间】\n背景为 1 片重度虚化银杏黄叶（奶油散景、满树圆叶失轮廓变圆润色块、金黄色至橙黄色调、布满画面上半与左右两侧、无清晰枝干树干可辨）：画面上部 1 片最透亮光区（阳光透叶隙形成的白色与浅黄圆形光斑、大小不一散布于垂直 0-50% 区域、左上最亮）；画面中部偏下 1 团深褐暗区（树冠内部阴影、位于垂直 50-75% 中偏左、亮度最低）；四角暗部（左下右下边缘色彩深沉）；叶隙间隐约 1 层模糊暗色细枝线条（融于色块、不可分辨粗细）；整体为秋日银杏林中 1 隅，人物半身静立于金光散景之前。\n\n【光影】\n``` (1/2)",
+      "string_b": "柔和漫射自然光（日光经银杏叶隙滤透、无强直射硬影）：仕女面部受光均匀柔和（侧上方来光）、鼻梁与唇部 1 层细腻高光，发丝边缘与金冠勾出 1 层暖金轮廓光；金冠宝石各 1 点锐利反光、流苏金珠微亮；衣面丝绸在肩部与胸前呈 1 道柔和高光带（缎面反光）、凤凰刺绣金丝随光线明暗流转；团扇扇面杏黄底色被光打透 1 层暖调、白花图案清晰；背景黄叶光斑圆润奶油感、无锐利投影；画面阴影一律柔和投向人物右下方、边缘虚化不锐利。\n\n【色彩与质感】\n米白刺绣立领衫 + 杏黄团扇 + 金冠流苏 + 琥珀银杏散景构成暖调低饱和国风色系；缎面丝绸反光质感、金银丝刺绣流光、金饰珠光、杏黄扇面透光纸质感、银杏奶油散景、共成一幅秋日静穆、金绿相映的古典仕女质感体系。\n``` (2/2)",
+      "delimiter": ""
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "true"
+    }
+  },
+  "65": {
+    "inputs": {
+      "文本": "Moody dark kitchen product poster, a glossy crimson capsule espresso machine on a grey concrete stone countertop, bright window light from the right rear casting crisp highlights on the red body and chrome ring. Scattered aluminum coffee capsules, a glass of espresso with golden crema, chocolate cake with fresh fig on a black plate, croissant, iced latte in a curvy glass. Dark charcoal cabinets softly blurred behind, shallow depth of field, cinematic commercial photography, warm red as the only strong color accent"
+    },
+    "class_type": "GGTextDisplayCopy",
+    "_meta": {
+      "title": "false"
+    }
+  },
+  "66": {
+    "inputs": {
+      "switch": false,
+      "on_false": [
+        "65",
+        0
+      ],
+      "on_true": [
+        "62",
+        0
+      ]
+    },
+    "class_type": "ComfySwitchNode",
+    "_meta": {
+      "title": "If/Else Switch"
+    }
+  },
+  "67": {
+    "inputs": {
+      "LoRA数量": 1,
+      "LoRA1名称": "qwen\\dlss_edit.safetensors",
+      "LoRA1强度": 0.55,
+      "LoRA2名称": "None",
+      "LoRA2强度": 1,
+      "LoRA3名称": "None",
+      "LoRA3强度": 1,
+      "LoRA4名称": "None",
+      "LoRA4强度": 1,
+      "LoRA5名称": "None",
+      "LoRA5强度": 1,
+      "LoRA6名称": "None",
+      "LoRA6强度": 1,
+      "LoRA7名称": "None",
+      "LoRA7强度": 1,
+      "LoRA8名称": "None",
+      "LoRA8强度": 1,
+      "LoRA9名称": "None",
+      "LoRA9强度": 1,
+      "LoRA10名称": "None",
+      "LoRA10强度": 1,
+      "LoRA11名称": "None",
+      "LoRA11强度": 1,
+      "LoRA12名称": "None",
+      "LoRA12强度": 1,
+      "LoRA13名称": "None",
+      "LoRA13强度": 1,
+      "LoRA14名称": "None",
+      "LoRA14强度": 1,
+      "LoRA15名称": "None",
+      "LoRA15强度": 1,
+      "LoRA16名称": "None",
+      "LoRA16强度": 1,
+      "LoRA17名称": "None",
+      "LoRA17强度": 1,
+      "LoRA18名称": "None",
+      "LoRA18强度": 1,
+      "LoRA19名称": "None",
+      "LoRA19强度": 1,
+      "LoRA20名称": "None",
+      "LoRA20强度": 1,
+      "模型": [
+        "96",
+        0
+      ]
+    },
+    "class_type": "GGLoRACustomLoader",
+    "_meta": {
+      "title": "GG LoRA自定义加载"
+    }
+  },
+  "82": {
+    "inputs": {
+      "switch": false,
+      "on_false": [
+        "87",
+        0
+      ],
+      "on_true": [
+        "90:85",
+        0
+      ]
+    },
+    "class_type": "ComfySwitchNode",
+    "_meta": {
+      "title": "为真时放大"
+    }
+  },
+  "87": {
+    "inputs": {
+      "清除缓存": true,
+      "清除模型": true,
+      "清除VAE缓存": true,
+      "任何": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "GGMemoryCleanup",
+    "_meta": {
+      "title": "GG 内存清理"
+    }
+  },
+  "92": {
+    "inputs": {
+      "sage_attention": "auto",
+      "allow_compile": false,
+      "model": [
+        "13",
+        0
+      ]
+    },
+    "class_type": "PathchSageAttentionKJ",
+    "_meta": {
+      "title": "Patch Sage Attention KJ"
+    }
+  },
+  "93": {
+    "inputs": {
+      "device": "auto",
+      "dtype": "default",
+      "model": [
+        "92",
+        0
+      ]
+    },
+    "class_type": "QwenImage21Cache",
+    "_meta": {
+      "title": "Qwen Image 2.1 Cache"
+    }
+  },
+  "96": {
+    "inputs": {
+      "LoRA数量": 1,
+      "LoRA1名称": "qwen\\Qwen-Image-2.1-viggle-turbo-v0.3-6step-lora-r256.safetensors",
+      "LoRA1强度": 1,
+      "LoRA2名称": "None",
+      "LoRA2强度": 1,
+      "LoRA3名称": "None",
+      "LoRA3强度": 1,
+      "LoRA4名称": "None",
+      "LoRA4强度": 1,
+      "LoRA5名称": "None",
+      "LoRA5强度": 1,
+      "LoRA6名称": "None",
+      "LoRA6强度": 1,
+      "LoRA7名称": "None",
+      "LoRA7强度": 1,
+      "LoRA8名称": "None",
+      "LoRA8强度": 1,
+      "LoRA9名称": "None",
+      "LoRA9强度": 1,
+      "LoRA10名称": "None",
+      "LoRA10强度": 1,
+      "LoRA11名称": "None",
+      "LoRA11强度": 1,
+      "LoRA12名称": "None",
+      "LoRA12强度": 1,
+      "LoRA13名称": "None",
+      "LoRA13强度": 1,
+      "LoRA14名称": "None",
+      "LoRA14强度": 1,
+      "LoRA15名称": "None",
+      "LoRA15强度": 1,
+      "LoRA16名称": "None",
+      "LoRA16强度": 1,
+      "LoRA17名称": "None",
+      "LoRA17强度": 1,
+      "LoRA18名称": "None",
+      "LoRA18强度": 1,
+      "LoRA19名称": "None",
+      "LoRA19强度": 1,
+      "LoRA20名称": "None",
+      "LoRA20强度": 1,
+      "模型": [
+        "93",
+        0
+      ]
+    },
+    "class_type": "GGLoRACustomLoader",
+    "_meta": {
+      "title": "GG LoRA自定义加载"
+    }
+  },
+  "90:81": {
+    "inputs": {
+      "CLIP名称": "qwen\\qwen3vl_8b_int8_convrot.safetensors",
+      "CLIP类型": "qwen_image",
+      "VAE名称": "qwen\\qwen_image_2.1_vae_bf16.safetensors",
+      "分辨率": 1024,
+      "正向提示词": "Enhance this image to high resolution while preserving the original composition, lighting, and atmosphere. Image can be illustration or real photo, keep the original input style.",
+      "负向提示词": "",
+      "图像.图像1": [
+        "87",
+        0
+      ]
+    },
+    "class_type": "GGPromptOptimizer",
+    "_meta": {
+      "title": "GG 提示词优化qwen2.1"
+    }
+  },
+  "90:68": {
+    "inputs": {
+      "expression": "a * min(4, sqrt((2048*2048)/(a*b)))",
+      "a": [
+        "90:72",
+        0
+      ],
+      "b": [
+        "90:72",
+        1
+      ]
+    },
+    "class_type": "MathExpression|pysssss",
+    "_meta": {
+      "title": "Math Expression 🐍"
+    }
+  },
+  "90:72": {
+    "inputs": {
+      "image": [
+        "87",
+        0
+      ]
+    },
+    "class_type": "GetImageSize",
+    "_meta": {
+      "title": "Get Image Size"
+    }
+  },
+  "90:73": {
+    "inputs": {
+      "expression": "b * min(4, sqrt((2048*2048)/(a*b)))",
+      "a": [
+        "90:72",
+        0
+      ],
+      "b": [
+        "90:72",
+        1
+      ]
+    },
+    "class_type": "MathExpression|pysssss",
+    "_meta": {
+      "title": "Math Expression 🐍"
+    }
+  },
+  "90:75": {
+    "inputs": {
+      "width": [
+        "90:68",
+        0
+      ],
+      "height": [
+        "90:73",
+        0
+      ],
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent Image"
+    }
+  },
+  "90:77": {
+    "inputs": {
+      "seed": 817969027343315,
+      "steps": 25,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "90:94",
+        0
+      ],
+      "positive": [
+        "90:81",
+        0
+      ],
+      "negative": [
+        "90:81",
+        1
+      ],
+      "latent_image": [
+        "90:75",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "90:85": {
+    "inputs": {
+      "samples": [
+        "90:77",
+        0
+      ],
+      "vae": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "90:91": {
+    "inputs": {
+      "unet_name": "qwen\\qwen_image_2.1_bf16.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "90:94": {
+    "inputs": {
+      "device": "auto",
+      "dtype": "default",
+      "model": [
+        "90:95",
+        0
+      ]
+    },
+    "class_type": "QwenImage21Cache",
+    "_meta": {
+      "title": "Qwen Image 2.1 Cache"
+    }
+  },
+  "90:95": {
+    "inputs": {
+      "sage_attention": "auto",
+      "allow_compile": false,
+      "model": [
+        "90:91",
+        0
+      ]
+    },
+    "class_type": "PathchSageAttentionKJ",
+    "_meta": {
+      "title": "Patch Sage Attention KJ"
+    }
+  }
+}

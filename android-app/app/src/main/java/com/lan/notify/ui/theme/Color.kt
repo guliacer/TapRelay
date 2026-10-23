@@ -33,6 +33,8 @@ data class AppColors(
     val PrimarySage: Color,
     val PrimarySageStrong: Color,
     val PrimarySageSoft: Color,
+    // —— 置顶星标：高饱和琥珀金，与鼠尾草绿正文形成明显对比 ——
+    val StarActive: Color,
     // —— 顶栏 / 主按钮统一鼠尾草绿（顶栏底色 = 主按钮填充，文字/图标色 = 按钮字色）——
     val TopBarSage: Color,
     val TopBarSageContent: Color,
@@ -70,6 +72,8 @@ val LightAppColors = AppColors(
     PrimarySage = Color(0xFF6F867E),
     PrimarySageStrong = Color(0xFF536962),
     PrimarySageSoft = Color(0xFFEEF1EC),
+    // 浅色模式置顶星标：琥珀金 #F59E0B，在白卡与鼠尾草绿正文上都醒目。
+    StarActive = Color(0xFFF59E0B),
     // 浅色顶栏：淡鼠尾草绿底 + 深鼠尾草绿字（状态栏深色图标清晰可见）
     TopBarSage = Color(0xFFD8E4DE),
     TopBarSageContent = Color(0xFF3E5249),
@@ -112,6 +116,8 @@ val DarkAppColors = AppColors(
     PrimarySage = Color(0xFF6F867E),
     PrimarySageStrong = Color(0xFFA8BEB5),
     PrimarySageSoft = Color(0xFF2A3530),
+    // 深色模式置顶星标：更亮的琥珀金 #FBBF24，保证深底上的辨识度。
+    StarActive = Color(0xFFFBBF24),
     // 深色顶栏/主按钮：保持深 sage 底 + 白字，与浅色模式同一色系
     TopBarSage = Color(0xFF6F867E),
     TopBarSageContent = Color(0xFFFFFFFF),

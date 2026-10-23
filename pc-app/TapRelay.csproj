@@ -39,6 +39,8 @@
   <ItemGroup>
     <None Update="Assets\*.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <EmbeddedResource Include="Assets\*.png" />
+    <None Update="Assets\ComfyUIConsole\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <EmbeddedResource Include="Assets\ComfyUIConsole\**\*" />
   </ItemGroup>
 
 </Project>

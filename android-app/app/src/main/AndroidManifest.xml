@@ -5,6 +5,8 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- 扫描 PC 端二维码，仅在用户点击“扫码连接”时申请运行时权限。 -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Android 9 及以下写入系统公共图片目录需要此权限；Android 10+ 使用 MediaStore scoped storage。 -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <!-- Android 13+ requires an explicit runtime grant before task notifications can be posted. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />

@@ -71,6 +71,7 @@ namespace TapRelay
         private IHost? _host;
         private int _appRegistryRefreshScheduled;
         private NotifyServerConfig _config;
+        private readonly ComfyUiConsoleHost _comfyUiConsole = new ComfyUiConsoleHost();
 
         public NotifyServer(NotifyServerConfig? config = null)
         {
@@ -508,6 +509,15 @@ namespace TapRelay
             try
             {
                 await _host.StartAsync();
+                try
+                {
+                    await _comfyUiConsole.StartAsync(Log);
+                    Log("ComfyUI 手机控制台已接入 /comfy（内部服务仅监听本机回环地址）");
+                }
+                catch (Exception error)
+                {
+                    Log("ComfyUI 手机控制台启动失败：" + error.Message);
+                }
                 Log("服务已启动：http://localhost:" + listenPort + "/send，监听 " + _config.ListenAddress);
                 PublishSnapshot();
             }
@@ -531,6 +541,7 @@ namespace TapRelay
             var stopwatch = Stopwatch.StartNew();
             var abortedClients = AbortConnectedClients();
             Log("开始停止服务，已立即中止 " + abortedClients + " 个手机客户端连接");
+            await _comfyUiConsole.StopAsync();
             try
             {
                 // 用户主动停止时不等待 WebSocket close handshake。后台被冻结的手机
@@ -732,6 +743,14 @@ namespace TapRelay
             if (context.WebSockets.IsWebSocketRequest)
             {
                 await AcceptWebSocketAsync(context);
+                return;
+            }
+
+            var requestPath = context.Request.Path.Value ?? string.Empty;
+            if (requestPath.Equals("/comfy", StringComparison.OrdinalIgnoreCase) ||
+                requestPath.StartsWith("/comfy/", StringComparison.OrdinalIgnoreCase))
+            {
+                await _comfyUiConsole.HandleRequestAsync(context);
                 return;
             }
 

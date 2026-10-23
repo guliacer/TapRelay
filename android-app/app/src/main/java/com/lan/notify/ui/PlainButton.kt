@@ -39,7 +39,8 @@ import com.lan.notify.ui.theme.appColors
  * - 圆角 12dp（小圆角，不再是全圆角胶囊）
  * - PRIMARY/SMALL：顶栏同款鼠尾草绿（TopBarSage）填充 + 深 sage 字，与顶栏统一
  * - SECONDARY：透明底 + sage 描边 + sage 字（不得出现文字背后的白色小横条）
- * - 高度 36dp（SMALL 28dp），一行多按钮不错位
+ * - DANGER：透明底 + Danger 描边与字色，用于同规格的删除类操作
+ * - 高度 36dp（SMALL / DANGER 28dp），一行多按钮不错位
  * - 按压缩放 0.975 + 阴影动画 + 触觉反馈
  *
  * 实现注意：
@@ -47,7 +48,7 @@ import com.lan.notify.ui.theme.appColors
  * 标签文字背后额外铺一层 Surface/白底，看起来像「文字后面的白色小横条」。
  * 这里用 Box + background/border + Text 自绘，背景色完全由我们控制。
  */
-enum class PlainButtonVariant { PRIMARY, SECONDARY, SMALL }
+enum class PlainButtonVariant { PRIMARY, SECONDARY, SMALL, DANGER }
 
 /** 统一圆角 12dp，比胶囊形更克制，适合紧凑布局。 */
 private val ButtonShape = RoundedCornerShape(12.dp)
@@ -153,6 +154,17 @@ fun PlainButton(
             container = appColors.TopBarSage
             content = appColors.TopBarSageContent
             borderColor = null
+            defaultElevation = 0f
+            pressedElevation = 0f
+            pressedScale = 0.96f
+        }
+        PlainButtonVariant.DANGER -> {
+            height = 28.dp
+            horizontalPadding = 10.dp
+            fontSize = 11.sp
+            container = Color.Transparent
+            content = appColors.Danger
+            borderColor = appColors.Danger
             defaultElevation = 0f
             pressedElevation = 0f
             pressedScale = 0.96f

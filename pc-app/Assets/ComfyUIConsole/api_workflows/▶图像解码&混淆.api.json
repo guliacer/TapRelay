@@ -1,0 +1,43 @@
+{
+  "1": {
+    "inputs": {
+      "image": "混淆_00001_.jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "5": {
+    "inputs": {
+      "模式": "解码",
+      "密码": "0100",
+      "图像": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "GGImageObfuscate",
+    "_meta": {
+      "title": "GG 图像混淆"
+    }
+  },
+  "6": {
+    "inputs": {
+      "文件名前缀": "%date:yyyy_MM_dd%/解码",
+      "格式": "JPEG",
+      "压缩模式": "civilblur",
+      "质量": 85,
+      "目标大小KB": 0,
+      "清除内存": true,
+      "图像": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "GGImageCompressSave",
+    "_meta": {
+      "title": "GG 图像压缩保存"
+    }
+  }
+}

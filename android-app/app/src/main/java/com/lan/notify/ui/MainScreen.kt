@@ -105,7 +105,8 @@ fun MainScreen(
     hostHistory: List<HostHistoryEntry> = emptyList(),
     hostMasked: Boolean = false,
     onHostMaskedChange: (Boolean) -> Unit = {},
-    onClearHostHistory: () -> Unit = {}
+    onClearHostHistory: () -> Unit = {},
+    onOpenComfyUi: () -> Unit = {}
 ) {
     var showPersonalProjectsDialog by rememberSaveable { mutableStateOf(false) }
     var showDeviceControlSheet by rememberSaveable { mutableStateOf(false) }
@@ -127,6 +128,11 @@ fun MainScreen(
                     actionIconContentColor = topBarContent
                 ),
                 actions = {
+                    ComfyUiIconButton(
+                        onClick = onOpenComfyUi,
+                        tint = topBarContent,
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
                     PersonalProjectsIconButton(
                         onClick = { showPersonalProjectsDialog = true },
                         tint = topBarContent,

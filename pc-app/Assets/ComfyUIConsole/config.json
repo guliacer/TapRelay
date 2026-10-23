@@ -1,0 +1,6 @@
+{
+  "comfy_url": "http://127.0.0.1:8188",
+  "port": 8899,
+  "bind": "127.0.0.1",
+  "open_admin": true
+}

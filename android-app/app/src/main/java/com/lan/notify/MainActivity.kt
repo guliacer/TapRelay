@@ -31,6 +31,7 @@ import com.lan.notify.data.safeActionUri
 import com.lan.notify.notification.NotificationHelper
 import com.lan.notify.service.WebSocketService
 import com.lan.notify.ui.MainScreen
+import com.lan.notify.ui.ComfyUiScreen
 import com.lan.notify.ui.PermissionCheckScreen
 import com.lan.notify.ui.theme.NotifyTheme
 import com.lan.notify.util.AutoStartHelper
@@ -94,6 +95,7 @@ class MainActivity : ComponentActivity() {
             val hostMasked by MessageRepository.hostMasked.collectAsState()
             // 首次启动自动进入权限向导（onboarding 模式），用户完成/跳过后才进主界面。
             var showPermissionCheck by remember { mutableStateOf(!MessageRepository.isOnboardingDone) }
+            var showComfyUi by remember { mutableStateOf(false) }
             NotifyTheme(themeMode = themeMode) {
                 val uiState by MessageRepository.state.collectAsState()
                 BackHandler(enabled = showPermissionCheck) {
@@ -108,6 +110,12 @@ class MainActivity : ComponentActivity() {
                             MessageRepository.completeOnboarding()
                         },
                         onOpenAutoStartSettings = ::openAutoStartSettings
+                    )
+                } else if (showComfyUi) {
+                    BackHandler { showComfyUi = false }
+                    ComfyUiScreen(
+                        serverHost = uiState.serverHost,
+                        onBack = { showComfyUi = false }
                     )
                 } else {
                     MainScreen(
@@ -143,6 +151,9 @@ class MainActivity : ComponentActivity() {
                                 MessageRepository.state.value.messages
                             )
                             MessageRepository.clearMessages()
+                        },
+                        onOpenComfyUi = {
+                            showComfyUi = true
                         },
                     )
                 }

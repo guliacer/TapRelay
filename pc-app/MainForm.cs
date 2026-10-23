@@ -102,6 +102,11 @@ namespace TapRelay
         // 方案 B-4：地址行保留一个轻量复制入口，避免把「复制地址」藏进更多菜单。
         private readonly StripIconButton _copyAddressButton =
             new StripIconButton(StripIconButton.Glyph.Copy, "复制完整连接地址");
+        // 脱敏只改变地址行的显示文本，不改变 _realAddressText，
+        // 因此复制、二维码和手机连接仍使用完整地址。
+        private readonly StripIconButton _maskAddressButton =
+            new StripIconButton(StripIconButton.Glyph.Mask, "脱敏显示连接地址", "脱敏");
+        private bool _addressMasked;
         private readonly CenteredTextBox _messageBox = new CenteredTextBox();
         private readonly Label _messageMarqueeLabel = new Label();
         private readonly TextBox _logBox = new TextBox();
@@ -539,12 +544,14 @@ namespace TapRelay
             _iconMore.Click += (_, __) =>
                 _serviceMoreMenu.Show(_iconMore, new Point(0, _iconMore.Height));
             _copyAddressButton.Click += (_, __) => CopyAddressToClipboard();
+            _maskAddressButton.Click += (_, __) => ToggleAddressMask();
             // 图标按钮没有文字标签，ToolTip 是唯一的口头说明；AccessibleName 已由构造函数给出。
             _toolTip.SetToolTip(_iconQr, "显示连接二维码");
             _toolTip.SetToolTip(_iconProjects, "个人项目");
             _toolTip.SetToolTip(_iconTheme, "切换深浅色主题");
             _toolTip.SetToolTip(_iconMore, "更多服务操作");
             _toolTip.SetToolTip(_copyAddressButton, "复制完整连接地址");
+            _toolTip.SetToolTip(_maskAddressButton, "脱敏显示连接地址");
             // 图标按钮的 hover 底色与图标色在 ApplyTheme 里统一刷，这里给出浅色主题的初值，
             // 避免 BuildLayout 与首次 ApplyTheme 之间的短暂窗口出现纯黑图标。
             _iconQr.ApplyColors(
@@ -556,6 +563,8 @@ namespace TapRelay
             _iconMore.ApplyColors(
                 LightTheme.Surface, LightTheme.TextSecondary, LightTheme.SurfaceAlt, LightTheme.InputFocusBorder);
             _copyAddressButton.ApplyColors(
+                LightTheme.Surface, LightTheme.TextSecondary, LightTheme.SurfaceAlt, LightTheme.InputFocusBorder);
+            _maskAddressButton.ApplyColors(
                 LightTheme.Surface, LightTheme.TextSecondary, LightTheme.SurfaceAlt, LightTheme.InputFocusBorder);
 
             _serviceCard.BackColor = LightTheme.Surface;
@@ -809,6 +818,7 @@ namespace TapRelay
                 _addressHintLabel,
                 _addressBox,
                 _addressMarqueeLabel,
+                _maskAddressButton,
                 _copyAddressButton,
                 _startButton,
                 _stopButton,
@@ -1014,6 +1024,7 @@ namespace TapRelay
 
             // 地址行只剩当前服务的主操作：二维码与更多菜单已上移到顶部状态条（方案 B-3）。
             // 方案 B-4 再加一个 28px 复制图标，地址输入框仍保留最大可读宽度。
+            // 脱敏按钮带「脱敏」文字，排在复制图标左侧，地址框让出两者的总宽度。
             var primaryActionWidth = Math.Max(96,
                 TextRenderer.MeasureText("启动服务", PrimaryActionFont).Width + 28);
             _startButton.Size = new Size(primaryActionWidth, InputHeight);
@@ -1024,9 +1035,13 @@ namespace TapRelay
             _copyAddressButton.Location = new Point(
                 _startButton.Left - Gap - StripIconSize,
                 y + (InputHeight - StripIconSize) / 2);
+            _maskAddressButton.Size = new Size(_maskAddressButton.PreferredWidth, StripIconSize);
+            _maskAddressButton.Location = new Point(
+                _copyAddressButton.Left - Gap - _maskAddressButton.Width,
+                y + (InputHeight - StripIconSize) / 2);
             _addressBox.Location = new Point(innerLeft, y);
             _addressBox.Size = new Size(
-                Math.Max(120, _copyAddressButton.Left - Gap - innerLeft),
+                Math.Max(120, _maskAddressButton.Left - Gap - innerLeft),
                 InputHeight);
             _addressMarqueeLabel.Location = _addressBox.Location;
             _addressMarqueeLabel.Size = _addressBox.Size;
@@ -1505,6 +1520,40 @@ namespace TapRelay
             }
         }
 
+        /// <summary>
+        /// 脱敏只影响地址框的显示；_realAddressText 保持不变，复制与二维码仍拿到完整地址。
+        /// </summary>
+        private void ToggleAddressMask()
+        {
+            if (string.IsNullOrWhiteSpace(_realAddressText) ||
+                _realAddressText.StartsWith("未找到", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _addressMasked = !_addressMasked;
+            RefreshAddressDisplay();
+            AppendLog(_addressMasked ? "连接地址已脱敏显示。" : "连接地址已恢复完整显示。");
+        }
+
+        private void RefreshAddressDisplay()
+        {
+            _addressBox.Text = _addressMasked
+                ? MaskAddressForDisplay(_realAddressText)
+                : FormatAddressForDisplay(_realAddressText);
+            _addressMarqueeOffset = 0;
+            ResetTextMarquee(_addressBox);
+            UpdateFieldMarquee(_addressBox, _addressMarqueeLabel, ref _addressMarqueeOffset);
+            // 悬停提示也不能泄露完整地址：脱敏态只给状态说明。
+            var addressToolTip = _addressMasked
+                ? "连接地址已脱敏显示，点击「脱敏」按钮可恢复完整地址。"
+                : "完整手机连接地址：\r\n" + (_realAddressText ?? string.Empty);
+            _toolTip.SetToolTip(_addressBox, addressToolTip);
+            _toolTip.SetToolTip(_addressMarqueeLabel, addressToolTip);
+            _toolTip.SetToolTip(_maskAddressButton, _addressMasked ? "显示完整连接地址" : "脱敏显示连接地址");
+            _maskAddressButton.Masked = _addressMasked;
+        }
+
         private async Task RunNotificationAutoDetectAsync()
         {
             if (!_autoDetectAppsButton.Enabled)
@@ -1657,16 +1706,7 @@ namespace TapRelay
                 // 真实地址始终存入 _realAddressText；显示框把多个候选端点
                 // 压成一条可巡航文本，复制与提示仍使用原始完整集合。
                 _realAddressText = snapshot.AddressText;
-                _addressBox.Text = FormatAddressForDisplay(_realAddressText);
-                _addressMarqueeOffset = 0;
-                ResetTextMarquee(_addressBox);
-                UpdateFieldMarquee(_addressBox, _addressMarqueeLabel, ref _addressMarqueeOffset);
-                _toolTip.SetToolTip(
-                    _addressBox,
-                    "完整手机连接地址：\r\n" + (_realAddressText ?? string.Empty));
-                _toolTip.SetToolTip(
-                    _addressMarqueeLabel,
-                    "完整手机连接地址：\r\n" + (_realAddressText ?? string.Empty));
+                RefreshAddressDisplay();
                 _startButton.Enabled = !snapshot.IsRunning;
                 _startButton.Visible = !snapshot.IsRunning;
                 _stopButton.Enabled = snapshot.IsRunning;
@@ -1677,6 +1717,7 @@ namespace TapRelay
                     !snapshot.AddressText.StartsWith("未找到", StringComparison.Ordinal);
                 _copyAddressButton.Enabled = !string.IsNullOrWhiteSpace(snapshot.AddressText) &&
                     !snapshot.AddressText.StartsWith("未找到", StringComparison.Ordinal);
+                _maskAddressButton.Enabled = _copyAddressButton.Enabled;
                 // 保持菜单可点击，由 ShowNetworkSettings 在运行中给出“请先停止服务”提示。
                 _networkSettingsMenuItem.Enabled = true;
                 _sendButton.Enabled = snapshot.IsRunning;
@@ -2074,6 +2115,109 @@ namespace TapRelay
                 .Where(line => line.Length > 0)
                 .ToArray();
             return string.Join("   |   ", lines);
+        }
+
+        /// <summary>
+        /// 脱敏展示：保留协议与端口，隐藏主机中可识别本机的部分。
+        /// IPv4 保留前两段，域名只保留后缀，用户信息与查询串整体替换为星号。
+        /// </summary>
+        private static string MaskAddressForDisplay(string addressText)
+        {
+            if (string.IsNullOrWhiteSpace(addressText))
+            {
+                return string.Empty;
+            }
+
+            var lines = addressText
+                .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(line => line.Trim())
+                .Where(line => line.Length > 0)
+                .Select(MaskEndpointForDisplay);
+            return string.Join("   |   ", lines);
+        }
+
+        private static string MaskEndpointForDisplay(string endpoint)
+        {
+            var schemeIndex = endpoint.IndexOf("://", StringComparison.Ordinal);
+            if (schemeIndex < 0)
+            {
+                // 「未找到可用地址…」之类的提示原样保留。
+                return endpoint;
+            }
+
+            var scheme = endpoint.Substring(0, schemeIndex + 3);
+            var rest = endpoint.Substring(schemeIndex + 3);
+            var authorityEnd = rest.IndexOfAny(new[] { '/', '?', '#' });
+            var authority = authorityEnd < 0 ? rest : rest.Substring(0, authorityEnd);
+            var tail = authorityEnd < 0 ? string.Empty : rest.Substring(authorityEnd);
+            var queryIndex = tail.IndexOfAny(new[] { '?', '#' });
+            if (queryIndex >= 0)
+            {
+                tail = tail.Substring(0, queryIndex) + "***";
+            }
+
+            var atIndex = authority.LastIndexOf('@');
+            var userInfo = atIndex >= 0 ? "***@" : string.Empty;
+            var hostPort = atIndex >= 0 ? authority.Substring(atIndex + 1) : authority;
+
+            var host = hostPort;
+            var port = string.Empty;
+            if (hostPort.StartsWith("[", StringComparison.Ordinal))
+            {
+                var closeIndex = hostPort.IndexOf(']');
+                if (closeIndex >= 0)
+                {
+                    host = hostPort.Substring(0, closeIndex + 1);
+                    if (closeIndex + 1 < hostPort.Length)
+                    {
+                        port = hostPort.Substring(closeIndex + 1);
+                    }
+                }
+            }
+            else
+            {
+                var colonIndex = hostPort.LastIndexOf(':');
+                if (colonIndex > 0)
+                {
+                    host = hostPort.Substring(0, colonIndex);
+                    port = hostPort.Substring(colonIndex);
+                }
+            }
+
+            return scheme + userInfo + MaskHostForDisplay(host) + port + tail;
+        }
+
+        private static string MaskHostForDisplay(string host)
+        {
+            if (string.IsNullOrEmpty(host))
+            {
+                return host;
+            }
+
+            var ipv4Parts = host.Split('.');
+            if (ipv4Parts.Length == 4 &&
+                ipv4Parts.All(part => part.Length > 0 && part.All(char.IsDigit)))
+            {
+                return ipv4Parts[0] + "." + ipv4Parts[1] + ".*.*";
+            }
+
+            if (host.Length > 2 && host[0] == '[' && host[host.Length - 1] == ']')
+            {
+                var groups = host.Substring(1, host.Length - 2).Split(':');
+                return groups.Length > 1
+                    ? "[" + groups[0] + ":" + string.Join(":", groups.Skip(1).Select(_ => "*")) + "]"
+                    : host;
+            }
+
+            var labels = host.Split('.');
+            if (labels.Length <= 1)
+            {
+                return "***";
+            }
+
+            return labels.Length == 2
+                ? "***." + labels[1]
+                : "***." + labels[labels.Length - 2] + "." + labels[labels.Length - 1];
         }
 
         private static void ConfigureMarqueeLabel(Label label, Font font)
@@ -3210,7 +3354,8 @@ namespace TapRelay
                 Book,
                 Theme,
                 More,
-                Copy
+                Copy,
+                Mask
             }
 
             private readonly Glyph _glyph;
@@ -3263,6 +3408,23 @@ namespace TapRelay
 
             /// <summary>主题图标需要区分当前模式：浅色主题画太阳、深色主题画月亮。</summary>
             public bool IsDarkMode { get; set; }
+
+            /// <summary>
+            /// 脱敏按钮的当前状态：未脱敏画「带斜线眼睛」（提示可隐藏），
+            /// 脱敏后画普通眼睛（提示可还原）。
+            /// </summary>
+            public bool Masked
+            {
+                get => _masked;
+                set
+                {
+                    if (_masked == value) return;
+                    _masked = value;
+                    Invalidate();
+                }
+            }
+
+            private bool _masked;
 
             public void ApplyColors(Color surface, Color iconColor, Color hoverSurface, Color focusRing)
             {
@@ -3425,6 +3587,9 @@ namespace TapRelay
                             case Glyph.Copy:
                                 DrawCopyIcon(g, pen, P);
                                 break;
+                            case Glyph.Mask:
+                                DrawEyeIcon(g, pen, P, !Masked);
+                                break;
                         }
                     }
                 }
@@ -3469,6 +3634,41 @@ namespace TapRelay
                     path.AddLine(p(10f, 19f), p(10f, 8f));
                     path.CloseFigure();
                     g.DrawPath(pen, path);
+                }
+            }
+
+            /// <summary>
+            /// 脱敏开关：眼睛表示「可见」，斜线表示当前已隐藏。
+            /// 眼形用两段贝塞尔闭合，中间补一个实心瞳孔，28px 下仍能读出语义。
+            /// </summary>
+            private static void DrawEyeIcon(
+                Graphics g, Pen pen, Func<float, float, PointF> p, bool slashed)
+            {
+                using (var path = new GraphicsPath())
+                {
+                    path.StartFigure();
+                    path.AddBezier(p(2.5f, 12f), p(6f, 6.5f), p(18f, 6.5f), p(21.5f, 12f));
+                    path.AddBezier(p(21.5f, 12f), p(18f, 17.5f), p(6f, 17.5f), p(2.5f, 12f));
+                    path.CloseFigure();
+                    g.DrawPath(pen, path);
+                }
+
+                var center = p(12f, 12f);
+                var edge = p(14.2f, 12f);
+                var radius = Math.Max(0.8f, edge.X - center.X);
+                using (var brush = new SolidBrush(pen.Color))
+                {
+                    g.FillEllipse(
+                        brush,
+                        center.X - radius,
+                        center.Y - radius,
+                        radius * 2f,
+                        radius * 2f);
+                }
+
+                if (slashed)
+                {
+                    g.DrawLine(pen, p(4.5f, 19.5f), p(19.5f, 4.5f));
                 }
             }
 

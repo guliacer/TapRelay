@@ -43,6 +43,47 @@ TapRelay 是一套本地优先的任务通知中继：Windows PC 上的 AI Agent
 
 截图来自当前 PC 程序和 Android 模拟器的真实连通测试。PC 截图中的连接地址已脱敏；Android 截图使用模拟器地址 `10.0.2.2`。
 
+## ComfyUI 手机工作流控制
+
+除任务通知外，TapRelay 还在现有 `1122` 端口内提供 ComfyUI 手机控制页。Android 选择已配置的 API 工作流、填写参数并提交后，PC 端会把请求转给随 TapRelay 生命周期启动的控制台，再由它调用本机 ComfyUI。控制台只监听 `127.0.0.1`，手机不会看到额外端口；管理页 `/comfy/admin` 与 `/comfy/api/admin/*` 只接受 PC 本机回环请求。
+
+<div align="center">
+<table>
+  <tr>
+    <td align="center" valign="top">
+      <img src="./assets/readme/comfyui-workflows.jpg" alt="ComfyUI 工作流列表，包含星标置顶、导入和导出" width="250" />
+      <br />
+      <sub>工作流列表：星标置顶、拖动排序与导入 / 导出 / 删除</sub>
+    </td>
+    <td align="center" valign="top">
+      <img src="./assets/readme/comfyui-parameters.jpg" alt="ComfyUI 工作流参数页，包含运行面板、图片上传和提示词输入" width="250" />
+      <br />
+      <sub>参数页：按 `.ui.json` 自动生成面板，支持提示词与图片字段</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="top">
+      <img src="./assets/readme/comfyui-results.jpg" alt="ComfyUI 生成结果页，展示图片、用时、分辨率和保存按钮" width="250" />
+      <br />
+      <sub>结果页：历次结果、用时 / 分辨率、前后对比与保存</sub>
+    </td>
+    <td align="center" valign="top">
+      <img src="./assets/readme/comfyui-gallery.jpg" alt="跨工作流生成图汇总页，按工作流分组展示缩略图" width="250" />
+      <br />
+      <sub>生成图：跨工作流汇总本机暂存结果</sub>
+    </td>
+  </tr>
+</table>
+</div>
+
+- **工作流管理**：内置 Qwen Image 2.1 系列（文&图生图、常规图像编辑、高分局部编辑、Viggle Turbo）与「图像解码 & 混淆」；支持导入、导出、删除、星标置顶和长按拖动排序。
+- **参数面板**：按工作流的 `.ui.json` 生成中文参数；提示词支持复制、粘贴和清空；图片字段支持上传、缩略图预览与清除；LoRA 支持多槽位和自定义强度；局部编辑内置全屏蒙版画笔。
+- **运行与结果**：运行按钮显示已消耗时长并可停止；结果按历次累积（每个工作流最多 50 条），支持多保存节点分页、前后对比滑杆、全屏预览、保存到 `Download/ComfyUI`，以及经 PC 转发到素言。
+- **标题交互**：顶栏工作流名称自动循环滚动以完整显示，双击标题即可重命名；名称会持久化，重启和升级后不会丢失。
+- **生成图汇总**：列表顶栏的「生成图」按工作流分组汇总本机暂存图片，点击可查看大图。
+
+ComfyUI 功能要求 PC 本机已运行 ComfyUI（默认 `http://127.0.0.1:8188`），API 工作流由控制台管理；控制台程序与随包工作流位于 `pc-app/Assets/ComfyUIConsole`。
+
 ## 它能做什么
 
 - PC 桌面端启动内置 HTTP / WebSocket 服务，固定监听端口 `1122`。
@@ -52,6 +93,7 @@ TapRelay 是一套本地优先的任务通知中继：Windows PC 上的 AI Agent
 - 支持系统通知、消息历史、可选悬浮卡片、全屏提醒，以及设备名称和主题设置。
 - 手机端不提供继续会话或发送新指令入口；需要续接时请直接在电脑端对应应用中操作。
 - 支持任务状态、审批事件与本地自定义应用图标注册；未知来源仍可作为普通 TapRelay 消息接收。
+- 在同一 `1122` 端口内提供 ComfyUI 手机控制页：选择工作流、填写参数、上传图片、运行并查看或保存结果。
 
 ```text
 Claude / Codex / Trae / 脚本 / 其他本地工具
@@ -214,11 +256,14 @@ Content-Type: application/json
 
 `POST /events` 用于实时生命周期和审批事件；`GET /apps`、`POST /apps/register`、`GET /apps/icon/<appKey>` 用于同步本机注册的自定义应用元数据和图标。旧客户端仍可接收 `type="message"` 的 WebSocket 通知。
 
+ComfyUI 手机页通过 `/comfy/*` 访问 PC 端控制台，其中 `/comfy/api/mobile/*` 提供工作流导入、导出、删除、改名、LoRA 候选、遮罩合成和素言转发等手机专用接口。控制台由 TapRelay 自动启动并只监听本机回环地址；`/comfy/admin` 与 `/comfy/api/admin/*` 仅限 PC 本机访问。
+
 ## 数据与权限边界
 
 - Android 只使用本机 `SharedPreferences` 保存连接配置、最近 10 条连接地址（`host_history`）和最近 100 条消息；PC 服务只在内存中维护在线连接，不提供离线补发。
 - Android 设备名称默认是“PC设备”，可以在设备管理中修改；首页展示名称而非 IP 地址。
 - 开启「隐藏地址」后，地址栏、状态行、历史地址列表与系统通知里的地址都会脱敏；清空历史地址不会影响当前连接配置。
+- ComfyUI 结果索引与图片保存在 Android 私有目录（`files/ComfyUI`，每个工作流最多 50 条）；写入 `Download/ComfyUI` 或分享到素言都需要手动触发。工作流、参数、遮罩和转发请求都经 PC 的 `1122` 回环代理，`/comfy/admin` 与 `/comfy/api/admin/*` 不对手机开放。
 - 通知、相机扫码、悬浮窗、后台运行 / 电池优化和厂商自启动权限应按实际需要授予。拒绝悬浮窗权限时，应用退化为普通系统通知。
 - TapRelay 不应传输密码、令牌、私钥或完整敏感命令参数。`taskLog` 和审批摘要同样应先完成脱敏。
 - 不要使用端口映射、开放公网防火墙或未受保护的反向代理暴露 `1122`。本项目不提供账号体系、云端消息存储或公网推送。
@@ -242,13 +287,14 @@ npm test
 Pop-Location
 ```
 
-本文档截图在 2026-09-12 通过当前 `pc-app\publish\TapRelay.exe`、端口 `1122`、Android 模拟器和真实 `POST /send` 流程生成。它验证了 PC 服务健康检查、WebSocket 连接和 Android 接收链路；不替代对每一个第三方 Agent 版本的实机验收。
+本文档的通知截图在 2026-09-12 通过当前 `pc-app\publish\TapRelay.exe`、端口 `1122`、Android 模拟器和真实 `POST /send` 流程生成；ComfyUI 截图在 2026-10-23 由同一模拟器连接本机 ComfyUI 后实拍。它们验证了 PC 服务健康检查、WebSocket 连接、Android 接收链路和 ComfyUI 工作流控制，但不替代对每一个第三方 Agent 版本或工作流的实机验收。
 
 ## 项目结构
 
 ```text
 TapRelay/
 ├─ pc-app/          # WinForms 桌面端、内置 HTTP/WebSocket 服务、应用适配器
+│  └─ Assets/ComfyUIConsole/ # 随包 ComfyUI 控制台与内置 API 工作流
 ├─ android-app/     # Kotlin / Jetpack Compose Android 客户端
 ├─ notify-server/   # Node.js 协议实现和 Vitest 测试
 ├─ tools/           # 打包、构建与 Agent 接入脚本
@@ -265,6 +311,13 @@ TapRelay/
 **锁屏后没有提醒？** 先确认 Android 消息历史是否已经收到该条消息；若已收到但无横幅或全屏提示，请检查系统通知权限、通知渠道重要性、电池优化和厂商后台限制。悬浮卡片需要额外授予悬浮窗权限。
 
 **需要单独启动 Node.js 服务吗？** 不需要。日常使用由 `TapRelay.exe` 内置服务监听 `1122`；`notify-server` 用于协议开发和自动化测试。
+
+## 配套项目推荐
+
+以下项目与 TapRelay 搭配使用更顺手：
+
+- [SuYan（素言）](https://github.com/guliacer/SuYan) —— 本地素材管理软件。ComfyUI 生成结果可经 PC 直接发送到素言收件服务，生成后即可归档、检索和复用。
+- [ComfyUI-GuliNodes](https://github.com/guliacer/ComfyUI-GuliNodes) —— ComfyUI 自定义节点插件。内置 Qwen Image 与图像解码&混淆工作流依赖其中的 `GGImageComparer2`、`GGImageCompressSave`、`GGLoRACustomLoader`、`GGImageObfuscate` 等节点，使用前请先在 ComfyUI 中安装。
 
 ## 反馈
 

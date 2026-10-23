@@ -43,6 +43,47 @@ TapRelay is a local-first task notification relay. Local agents, desktop tools, 
 
 The screenshots were captured from the current PC application and an Android emulator during a real connection test. The PC endpoint is masked; `10.0.2.2` is the emulator host address.
 
+## ComfyUI Mobile Control
+
+TapRelay also serves a ComfyUI control page inside the existing port `1122`. The Android app selects a configured API workflow, fills in parameters, and submits it; the PC relays the request to a bundled console process managed by TapRelay, which calls the local ComfyUI instance. The console listens on `127.0.0.1` only, so no extra LAN port is exposed. The management page `/comfy/admin` and `/comfy/api/admin/*` accept loopback requests from the PC only.
+
+<div align="center">
+<table>
+  <tr>
+    <td align="center" valign="top">
+      <img src="./assets/readme/comfyui-workflows.jpg" alt="ComfyUI workflow list with starred pinning, import, and export" width="250" />
+      <br />
+      <sub>Workflow list: pin, reorder, import / export / delete</sub>
+    </td>
+    <td align="center" valign="top">
+      <img src="./assets/readme/comfyui-parameters.jpg" alt="ComfyUI parameter screen with run panel, image upload, and prompt editor" width="250" />
+      <br />
+      <sub>Parameters: generated from `.ui.json`, prompts, and image fields</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="top">
+      <img src="./assets/readme/comfyui-results.jpg" alt="ComfyUI result screen with image, duration, resolution, and save action" width="250" />
+      <br />
+      <sub>Results: history, duration / resolution, comparison, and save</sub>
+    </td>
+    <td align="center" valign="top">
+      <img src="./assets/readme/comfyui-gallery.jpg" alt="Cross-workflow generated image gallery grouped by workflow" width="250" />
+      <br />
+      <sub>Gallery: cached results across all workflows</sub>
+    </td>
+  </tr>
+</table>
+</div>
+
+- **Workflow management**: built-in Qwen Image 2.1 workflows (text & image to image, standard editing, high-resolution local editing, Viggle Turbo) plus image decode & obfuscate; import, export, delete, star-to-pin, and long-press drag ordering.
+- **Parameters**: Chinese parameter panels generated from each workflow's `.ui.json`; copy / paste / clear for prompts; upload, thumbnail, and clear for image fields; multi-slot LoRA with custom strengths; a full-screen mask brush for local editing.
+- **Running and results**: the run button shows elapsed time and can be stopped; results accumulate per workflow (up to 50 entries) with multi-output paging, a before/after comparison slider, full-screen preview, save to `Download/ComfyUI`, and forwarding to SuYan through the PC.
+- **Title interaction**: the workflow title scrolls automatically so long names stay readable; double-tap to rename, and the new name survives restarts and upgrades.
+- **Gallery**: the **Generated images** entry groups cached images from every workflow for quick review.
+
+ComfyUI must be running on the PC (default `http://127.0.0.1:8188`). The bundled console and workflows live in `pc-app/Assets/ComfyUIConsole`.
+
 ## Components
 
 | Component | Purpose |
@@ -144,10 +185,13 @@ Content-Type: application/json
 
 `POST /events` supports lifecycle and approval events. `GET /apps`, `POST /apps/register`, and `GET /apps/icon/<appKey>` expose locally registered custom app metadata and icons.
 
+The ComfyUI mobile page uses `/comfy/*` to reach the PC console. Mobile-only helpers live under `/comfy/api/mobile/*` (workflow import, export, delete, rename, LoRA candidates, mask composition, and SuYan forwarding). The console is started by TapRelay, listens on loopback only, and `/comfy/admin` plus `/comfy/api/admin/*` are restricted to the PC.
+
 ## Privacy and Limits
 
 - Android stores connection settings, the last 10 connection addresses (`host_history`) and the latest 100 messages locally. The PC only keeps connected clients in memory.
 - Android remembers connection addresses that were used successfully; **Device management** lists the last 10 (most recent first) so you can switch back without retyping. **Hide address** masks the address in the app UI, the history list and the system notification.
+- ComfyUI result indexes and images are stored in the Android private directory (`files/ComfyUI`, up to 50 entries per workflow). Writing to `Download/ComfyUI` or sharing to SuYan is always user-triggered. Workflows, parameters, masks, and forwarding requests all pass through the PC's `1122` loopback proxy; `/comfy/admin` and `/comfy/api/admin/*` are not exposed to the phone.
 - Notification, camera scanning, overlay, and background permissions are optional and should be granted only when required.
 - Do not send passwords, tokens, private keys, or full sensitive command arguments in task logs or approval summaries.
 - Do not use port forwarding, public firewall rules, or an unprotected reverse proxy for port `1122`.
@@ -166,4 +210,9 @@ npm test
 Pop-Location
 ```
 
-The screenshots for this README were produced on 2026-09-12 with the current `pc-app\publish\TapRelay.exe`, port `1122`, an Android emulator, and a real `POST /send` request. This verifies the PC health, WebSocket, and Android-receive path, not every third-party agent version.
+The notification screenshots were produced on 2026-09-12 with the current `pc-app\publish\TapRelay.exe`, port `1122`, an Android emulator, and a real `POST /send` request; the ComfyUI screenshots were captured on 2026-10-23 with the same emulator connected to a local ComfyUI instance. This verifies the PC health, WebSocket, Android-receive, and ComfyUI control paths, not every third-party agent version or workflow.
+
+## Related Projects
+
+- [SuYan](https://github.com/guliacer/SuYan) — local asset management. ComfyUI results can be sent from the PC to SuYan's local inbox for archiving, search, and reuse.
+- [ComfyUI-GuliNodes](https://github.com/guliacer/ComfyUI-GuliNodes) — ComfyUI custom nodes. The built-in Qwen Image and image decode/obfuscate workflows use nodes such as `GGImageComparer2`, `GGImageCompressSave`, `GGLoRACustomLoader`, and `GGImageObfuscate`, so install this plugin in ComfyUI first.

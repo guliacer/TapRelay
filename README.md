@@ -8,6 +8,8 @@
 
 中文文档（当前页） | [English (optional)](./README.en.md)
 
+<p><strong>致谢</strong>：ComfyUI 手机控制功能基于 <a href="https://github.com/Zizzp0318/ComfyUI-MobileConsole">ComfyUI-MobileConsole</a> 完善，感谢原项目作者。</p>
+
 </div>
 
 ## 项目概览

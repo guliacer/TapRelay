@@ -8,6 +8,8 @@
 
 [Chinese README](./README.md) | English (optional)
 
+<p><strong>Acknowledgement</strong>: The ComfyUI mobile control feature is based on and improved from <a href="https://github.com/Zizzp0318/ComfyUI-MobileConsole">ComfyUI-MobileConsole</a>. Thanks to the original author.</p>
+
 </div>
 
 ## Project Overview

@@ -82,7 +82,7 @@ TapRelay also serves a ComfyUI control page inside the existing port `1122`. The
 - **Title interaction**: the workflow title scrolls automatically so long names stay readable; double-tap to rename, and the new name survives restarts and upgrades.
 - **Gallery**: the **Generated images** entry groups cached images from every workflow for quick review.
 
-ComfyUI must be running on the PC (default `http://127.0.0.1:8188`). The bundled console and workflows live in `pc-app/Assets/ComfyUIConsole`.
+ComfyUI must be running on the PC (default `http://127.0.0.1:8188`). The console lives in `pc-app/Assets/ComfyUIConsole`, and the built-in workflow files are published in the repository: [pc-app/Assets/ComfyUIConsole/api_workflows](./pc-app/Assets/ComfyUIConsole/api_workflows).
 
 ## Components
 

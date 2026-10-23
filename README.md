@@ -82,7 +82,7 @@ TapRelay 是一套本地优先的任务通知中继：Windows PC 上的 AI Agent
 - **标题交互**：顶栏工作流名称自动循环滚动以完整显示，双击标题即可重命名；名称会持久化，重启和升级后不会丢失。
 - **生成图汇总**：列表顶栏的「生成图」按工作流分组汇总本机暂存图片，点击可查看大图。
 
-ComfyUI 功能要求 PC 本机已运行 ComfyUI（默认 `http://127.0.0.1:8188`），API 工作流由控制台管理；控制台程序与随包工作流位于 `pc-app/Assets/ComfyUIConsole`。
+ComfyUI 功能要求 PC 本机已运行 ComfyUI（默认 `http://127.0.0.1:8188`），API 工作流由控制台管理。控制台程序位于 `pc-app/Assets/ComfyUIConsole`，内置工作流文件已随仓库发布：[pc-app/Assets/ComfyUIConsole/api_workflows](./pc-app/Assets/ComfyUIConsole/api_workflows)。
 
 ## 它能做什么
 

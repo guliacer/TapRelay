@@ -26,6 +26,9 @@ W:\TapRelay\06-通信与数据获取规范.md
 涉及本地状态/消息历史时追加:
 W:\TapRelay\08-数据库与状态管理规范.md
 
+涉及 ComfyUI 手机工作流适配(api_workflows 下新增/更新工作流)时追加:
+W:\TapRelay\11-应用识别与适配规则.md(R8)
+
 涉及通用应用适配机制时追加:
 W:\TapRelay\11-应用识别与适配规则.md
 W:\TapRelay\.zcode\skills\adapt-app\SKILL.md

@@ -28,6 +28,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -91,6 +92,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -100,6 +102,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -126,6 +129,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -138,12 +142,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.ui.zIndex
 import com.lan.notify.R
 import com.lan.notify.data.ComfyOutputFile
 import com.lan.notify.data.ComfyImageCache
 import com.lan.notify.data.ComfyImageSaver
 import com.lan.notify.data.ComfyParam
+import com.lan.notify.data.ComfyParamPinStore
 import com.lan.notify.data.ComfyResultStore
 import com.lan.notify.data.ComfyUiRepository
 import com.lan.notify.data.ComfyWorkflowDetail
@@ -172,6 +178,7 @@ fun ComfyUiScreen(
     var workflows by remember { mutableStateOf<List<ComfyWorkflowSummary>>(emptyList()) }
     var selected by remember { mutableStateOf<ComfyWorkflowDetail?>(null) }
     var selectedWorkflowId by remember { mutableStateOf<String?>(null) }
+    var pinnedParamKeys by remember { mutableStateOf<List<String>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf("") }
     val values = remember { mutableStateMapOf<String, String>() }
@@ -197,6 +204,8 @@ fun ComfyUiScreen(
     var runningPrompt by remember { mutableStateOf("") }
     var runElapsedSeconds by remember { mutableStateOf(0L) }
     val saveStatus = remember { mutableStateMapOf<String, String>() }
+    val savedRecords = remember { mutableStateMapOf<String, Boolean>() }
+    var pendingReplaceOutput by remember { mutableStateOf<ComfyOutputFile?>(null) }
     var workflowActionText by remember { mutableStateOf("") }
     var importUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var exportWorkflowId by remember { mutableStateOf<String?>(null) }
@@ -233,9 +242,20 @@ fun ComfyUiScreen(
         ComfyWorkflowOrderStore.save(context, next)
     }
 
-    fun saveOutput(file: ComfyOutputFile) {
+    /** 把不常用参数固定到上方常用区，或取消固定；偏好按工作流 id 保存在手机本地。 */
+    fun togglePinnedParam(key: String) {
+        val workflowId = selectedWorkflowId ?: return
+        val next = if (key in pinnedParamKeys) {
+            pinnedParamKeys - key
+        } else {
+            pinnedParamKeys + key
+        }
+        pinnedParamKeys = next
+        ComfyParamPinStore.save(context, workflowId, next)
+    }
+
+    fun performSave(file: ComfyOutputFile, replace: Boolean = false) {
         val key = file.stableKey()
-        if (savingOutputKey != null || receivingOutputKey != null) return
         savingOutputKey = key
         saveStatus[key] = "正在保存到 Download/ComfyUI…"
         scope.launch {
@@ -243,8 +263,9 @@ fun ComfyUiScreen(
                 val staged = withContext(Dispatchers.IO) { ComfyImageCache.find(context, file) }
                     ?: throw IllegalStateException("手机暂存目录中没有这张图片，请重新接收")
                 val folder = withContext(Dispatchers.IO) {
-                    ComfyImageSaver.save(context, file.filename, staged)
+                    ComfyImageSaver.save(context, file.filename, staged, replaceExisting = replace)
                 }
+                savedRecords[key] = true
                 saveStatus[key] = "已保存到 $folder"
             } catch (e: Exception) {
                 saveStatus[key] = e.message ?: "保存图片失败"
@@ -252,6 +273,24 @@ fun ComfyUiScreen(
                 if (savingOutputKey == key) savingOutputKey = null
             }
         }
+    }
+
+    fun saveOutput(file: ComfyOutputFile) {
+        val key = file.stableKey()
+        if (savingOutputKey != null || receivingOutputKey != null) return
+        // 已保存过则先确认是否覆盖，避免重复写入。
+        val alreadySaved = savedRecords[key] == true ||
+            runCatching { ComfyImageSaver.isSaved(context, file.filename) }.getOrDefault(false)
+        if (alreadySaved) {
+            pendingReplaceOutput = file
+            return
+        }
+        performSave(file)
+    }
+
+    fun confirmReplaceSave(file: ComfyOutputFile) {
+        pendingReplaceOutput = null
+        performSave(file, replace = true)
     }
 
     fun sendOutputToSuyan(file: ComfyOutputFile) {
@@ -290,6 +329,7 @@ fun ComfyUiScreen(
                 } catch (_: Exception) {
                     // The workflow is already gone; a stale local index entry is harmless.
                 }
+                ComfyParamPinStore.remove(context, workflow.id)
                 updateWorkflows(workflows.filterNot { it.id == workflow.id })
                 workflowActionText = "已删除：${workflow.name}"
             } catch (e: Exception) {
@@ -696,7 +736,8 @@ fun ComfyUiScreen(
                 workflowName = { id ->
                     workflows.firstOrNull { it.id == id }?.name
                         ?: id.substringBefore('.').removePrefix("▶")
-                }
+                },
+                onSave = requestSaveOutput
             )
         } else if (selected == null) {
             WorkflowList(
@@ -725,10 +766,16 @@ fun ComfyUiScreen(
                     runFailed = false
                     showResults = false
                     saveStatus.clear()
+                    savedRecords.clear()
                     scope.launch {
                         try {
                             val detail = repository.loadWorkflow(id)
                             val params = detail.primary + detail.advanced
+                            // 恢复本机固定的参数；工作流更新后已移除的参数自动丢弃。
+                            val storedPins = ComfyParamPinStore.load(context, id)
+                            val pins = ComfyParamPinStore.normalize(storedPins, params.map { it.key })
+                            if (pins != storedPins) ComfyParamPinStore.save(context, id, pins)
+                            pinnedParamKeys = pins
                             selected = detail
                             selectedWorkflowId = id
                             values.clear()
@@ -786,10 +833,16 @@ fun ComfyUiScreen(
                                 runText = "历史结果 · ${restored.size} 张图片"
                                 val statuses = withContext(Dispatchers.IO) {
                                     restoredWithMeta.map { file ->
-                                        file.stableKey() to if (ComfyImageCache.find(context, file) != null) {
-                                            "已接收至 APP 私有目录"
-                                        } else {
-                                            "接收失败：暂存图片已丢失，可重新接收"
+                                        val key = file.stableKey()
+                                        val staged = ComfyImageCache.find(context, file) != null
+                                        val saved = ComfyImageSaver.isSaved(context, file.filename)
+                                        key to when {
+                                            saved -> {
+                                                savedRecords[key] = true
+                                                "已保存到 Download/ComfyUI"
+                                            }
+                                            staged -> "已接收至 APP 私有目录"
+                                            else -> "接收失败：暂存图片已丢失，可重新接收"
                                         }
                                     }
                                 }
@@ -814,6 +867,7 @@ fun ComfyUiScreen(
                 savingOutputKey = savingOutputKey,
                 sendingSuyanKey = sendingSuyanKey,
                 saveStatus = saveStatus,
+                savedRecords = savedRecords,
                 repository = repository,
                 onSave = requestSaveOutput,
                 onReceive = { file -> scope.launch { receiveOutput(file) } },
@@ -833,6 +887,8 @@ fun ComfyUiScreen(
                 runningSeconds = runElapsedSeconds,
                 repository = repository,
                 maskedKeys = maskBases.keys,
+                pinnedKeys = pinnedParamKeys,
+                onTogglePinned = ::togglePinnedParam,
                 onValueChange = { key, value -> values[key] = value },
                 onPickImage = { key -> uploadKey = key; imagePicker.launch("image/*") },
                 onEditMask = { key ->
@@ -905,6 +961,24 @@ fun ComfyUiScreen(
             },
             onConfirm = { submitRename() },
             onDismiss = { if (!renameSaving) renameOpen = false }
+        )
+    }
+    val pendingReplace = pendingReplaceOutput
+    if (pendingReplace != null) {
+        AlertDialog(
+            onDismissRequest = { pendingReplaceOutput = null },
+            shape = RoundedCornerShape(24.dp),
+            title = { Text("图片已保存过") },
+            text = { Text("「${pendingReplace.filename}」已经保存到 Download/ComfyUI，是否替换为本次的最新图片？") },
+            confirmButton = {
+                TextButton(
+                    onClick = { confirmReplaceSave(pendingReplace) },
+                    colors = ButtonDefaults.textButtonColors(contentColor = appColors.PrimarySageStrong)
+                ) { Text("替换") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingReplaceOutput = null }) { Text("取消") }
+            }
         )
     }
 }
@@ -1461,6 +1535,8 @@ private fun WorkflowEditor(
     runningSeconds: Long,
     repository: ComfyUiRepository,
     maskedKeys: Set<String>,
+    pinnedKeys: List<String>,
+    onTogglePinned: (String) -> Unit,
     onValueChange: (String, String) -> Unit,
     onPickImage: (String) -> Unit,
     onEditMask: (String) -> Unit,
@@ -1491,6 +1567,16 @@ private fun WorkflowEditor(
     val advancedParams = remember(detail, loraKeys) {
         detail.advanced.filterNot { it.key in loraKeys }
     }
+    val pinnedKeySet = remember(pinnedKeys) { pinnedKeys.toSet() }
+    val pinnedParams = remember(advancedParams, pinnedKeys) {
+        val byKey = advancedParams.associateBy { it.key }
+        pinnedKeys.mapNotNull { byKey[it] }
+    }
+    val foldedParams = remember(advancedParams, pinnedKeySet) {
+        advancedParams.filterNot { it.key in pinnedKeySet }
+    }
+    // 默认收起；同一工作流在旋转屏幕后保持当前展开状态，切换工作流重新收起。
+    var advancedExpanded by rememberSaveable(detail.id) { mutableStateOf(false) }
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(padding),
         contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 24.dp),
@@ -1522,6 +1608,25 @@ private fun WorkflowEditor(
                 onClearImage = onClearImage
             )
         }
+        if (pinnedParams.isNotEmpty()) {
+            item { ComfySectionHeader(title = "已固定到常用", count = pinnedParams.size) }
+            items(pinnedParams, key = { "pinned:${it.key}" }) { param ->
+                PinnableParamItem(
+                    param = param,
+                    value = values[param.key].orEmpty(),
+                    choices = if (param.isLoraNameParam() && loraFiles.isNotEmpty()) loraFiles else param.choices,
+                    choiceNote = if (param.isLoraNameParam()) loraNote else "",
+                    repository = repository,
+                    maskApplied = param.key in maskedKeys,
+                    pinned = true,
+                    onTogglePinned = { onTogglePinned(param.key) },
+                    onValueChange = onValueChange,
+                    onPickImage = onPickImage,
+                    onEditMask = onEditMask,
+                    onClearImage = onClearImage
+                )
+            }
+        }
         if (loraGroups.isNotEmpty()) {
             item { ComfySectionHeader(title = "LoRA 加载", count = loraGroups.size) }
             items(loraGroups, key = { "lora:${it.node}" }) { group ->
@@ -1534,21 +1639,32 @@ private fun WorkflowEditor(
                 )
             }
         }
-        if (advancedParams.isNotEmpty()) {
-            item { ComfySectionHeader(title = "高级参数", count = advancedParams.size) }
-            items(advancedParams, key = { it.key }) { param ->
-                ParamEditor(
-                    param = param,
-                    value = values[param.key].orEmpty(),
-                    choices = if (param.isLoraNameParam() && loraFiles.isNotEmpty()) loraFiles else param.choices,
-                    choiceNote = if (param.isLoraNameParam()) loraNote else "",
-                    repository = repository,
-                    maskApplied = param.key in maskedKeys,
-                    onValueChange = onValueChange,
-                    onPickImage = onPickImage,
-                    onEditMask = onEditMask,
-                    onClearImage = onClearImage
+        if (foldedParams.isNotEmpty()) {
+            item {
+                UncommonParamsToggle(
+                    expanded = advancedExpanded,
+                    count = foldedParams.size,
+                    onClick = { advancedExpanded = !advancedExpanded }
                 )
+            }
+            if (advancedExpanded) {
+                item { ComfySectionHeader(title = "不常用参数", count = foldedParams.size) }
+                items(foldedParams, key = { "folded:${it.key}" }) { param ->
+                    PinnableParamItem(
+                        param = param,
+                        value = values[param.key].orEmpty(),
+                        choices = if (param.isLoraNameParam() && loraFiles.isNotEmpty()) loraFiles else param.choices,
+                        choiceNote = if (param.isLoraNameParam()) loraNote else "",
+                        repository = repository,
+                        maskApplied = param.key in maskedKeys,
+                        pinned = false,
+                        onTogglePinned = { onTogglePinned(param.key) },
+                        onValueChange = onValueChange,
+                        onPickImage = onPickImage,
+                        onEditMask = onEditMask,
+                        onClearImage = onClearImage
+                    )
+                }
             }
         }
     }
@@ -1580,6 +1696,107 @@ private fun ComfySectionHeader(title: String, count: Int? = null, unit: String =
                 "$count $unit",
                 style = MaterialTheme.typography.labelSmall,
                 color = appColors.TextTertiary
+            )
+        }
+    }
+}
+
+@Composable
+private fun PinnableParamItem(
+    param: ComfyParam,
+    value: String,
+    choices: List<String>,
+    choiceNote: String,
+    repository: ComfyUiRepository,
+    maskApplied: Boolean,
+    pinned: Boolean,
+    onTogglePinned: () -> Unit,
+    onValueChange: (String, String) -> Unit,
+    onPickImage: (String) -> Unit,
+    onEditMask: (String) -> Unit,
+    onClearImage: (String) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        ParamEditor(
+            param = param,
+            value = value,
+            choices = choices,
+            choiceNote = choiceNote,
+            repository = repository,
+            maskApplied = maskApplied,
+            onValueChange = onValueChange,
+            onPickImage = onPickImage,
+            onEditMask = onEditMask,
+            onClearImage = onClearImage
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End
+        ) {
+            Surface(
+                onClick = onTogglePinned,
+                shape = RoundedCornerShape(50),
+                color = if (pinned) appColors.PrimarySageSoft else appColors.Surface,
+                border = BorderStroke(
+                    1.dp,
+                    if (pinned) {
+                        appColors.PrimarySage.copy(alpha = 0.35f)
+                    } else {
+                        appColors.BorderSoft
+                    }
+                )
+            ) {
+                Text(
+                    if (pinned) "取消固定" else "固定到常用",
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (pinned) appColors.PrimarySageStrong else appColors.TextSecondary
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun UncommonParamsToggle(
+    expanded: Boolean,
+    count: Int,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = appColors.Surface,
+        border = BorderStroke(1.dp, appColors.BorderSoft)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    if (expanded) "收起不常用参数" else "展开不常用参数",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = appColors.TextPrimary
+                )
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    if (expanded) {
+                        "$count 项 · 点参数下方按钮可固定到常用"
+                    } else {
+                        "$count 项 · 输出、采样、缓存等不常改动的设置"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = appColors.TextTertiary
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Text(
+                if (expanded) "▴" else "▾",
+                style = MaterialTheme.typography.titleMedium,
+                color = appColors.PrimarySage
             )
         }
     }
@@ -1740,7 +1957,8 @@ private fun ComfyGalleryScreen(
     padding: PaddingValues,
     groups: List<ComfyWorkflowResults>,
     loading: Boolean,
-    workflowName: (String) -> String
+    workflowName: (String) -> String,
+    onSave: (ComfyOutputFile) -> Unit = {}
 ) {
     var preview by remember { mutableStateOf<GalleryPreview?>(null) }
     val totalCount = groups.sumOf { it.outputs.size }
@@ -1830,7 +2048,8 @@ private fun ComfyGalleryScreen(
         ComfyImagePreview(
             outputs = target.outputs,
             initialIndex = target.index,
-            onDismiss = { preview = null }
+            onDismiss = { preview = null },
+            onSave = onSave
         )
     }
 }
@@ -1871,6 +2090,7 @@ private fun ComfyResultsScreen(
     savingOutputKey: String?,
     sendingSuyanKey: String?,
     saveStatus: Map<String, String>,
+    savedRecords: Map<String, Boolean>,
     repository: ComfyUiRepository,
     onSave: (ComfyOutputFile) -> Unit,
     onReceive: (ComfyOutputFile) -> Unit,
@@ -1949,6 +2169,7 @@ private fun ComfyResultsScreen(
                     saving = savingOutputKey == file.stableKey(),
                     sendingToSuyan = sendingSuyanKey == file.stableKey(),
                     status = saveStatus[file.stableKey()],
+                    saved = savedRecords[file.stableKey()] == true,
                     onSave = { onSave(file) },
                     onReceive = { onReceive(file) },
                     onSendToSuyan = { onSendToSuyan(file) },
@@ -1963,7 +2184,8 @@ private fun ComfyResultsScreen(
             ComfyImagePreview(
                 outputs = outputs,
                 initialIndex = index.coerceIn(0, outputs.lastIndex),
-                onDismiss = { previewIndex = null }
+                onDismiss = { previewIndex = null },
+                onSave = onSave
             )
         }
     }
@@ -3269,13 +3491,13 @@ private fun ComfyOutputItem(
     saving: Boolean,
     sendingToSuyan: Boolean,
     status: String?,
+    saved: Boolean = status?.startsWith("已保存") == true,
     onSave: () -> Unit,
     onReceive: () -> Unit,
     onSendToSuyan: () -> Unit,
     onPreview: () -> Unit,
     onCompare: () -> Unit
 ) {
-    val saved = status?.startsWith("已保存") == true
     val savingNow = saving || status?.startsWith("正在保存") == true
     val receivingNow = receiving || status == null || status.startsWith("正在接收")
     val needsReceive = status?.startsWith("接收失败") == true || status?.contains("请重新接收") == true
@@ -3286,10 +3508,6 @@ private fun ComfyOutputItem(
             !it.startsWith("正在接收") &&
             !it.startsWith("已接收")
     }
-    val savedFolder = status
-        ?.takeIf { saved }
-        ?.removePrefix("已保存到 ")
-        ?.takeIf { it.isNotBlank() }
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
@@ -3358,16 +3576,8 @@ private fun ComfyOutputItem(
                                 color = appColors.Success
                             )
                         }
-                        if (savedFolder != null) {
-                            Spacer(Modifier.height(3.dp))
-                            Text(
-                                savedFolder,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = appColors.TextTertiary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
+                        Spacer(Modifier.height(8.dp))
+                        ComfyOutputButton("重新保存（替换）", onSave, !saving && !receiving, emphasized = true)
                     }
                     needsReceive -> {
                         inlineError?.let {
@@ -3455,19 +3665,35 @@ private fun ComfyProgressNote(text: String) {
 }
 
 @Composable
-private fun ComfyOutputButton(text: String, onClick: () -> Unit, enabled: Boolean) {
+private fun ComfyOutputButton(
+    text: String,
+    onClick: () -> Unit,
+    enabled: Boolean,
+    emphasized: Boolean = false
+) {
     Button(
         onClick = onClick,
         enabled = enabled,
         modifier = Modifier.fillMaxWidth().height(40.dp),
         shape = RoundedCornerShape(12.dp),
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = appColors.PrimarySage,
-            contentColor = appColors.OnPrimary,
-            disabledContainerColor = appColors.PrimarySageSoft,
-            disabledContentColor = appColors.TextTertiary
-        )
+        colors = if (emphasized) {
+            // 已保存图片的替换操作：用主题绿描边样式，与首次保存的实心按钮区分。
+            ButtonDefaults.outlinedButtonColors(
+                containerColor = Color.Transparent,
+                contentColor = appColors.PrimarySageStrong,
+                disabledContainerColor = Color.Transparent,
+                disabledContentColor = appColors.TextTertiary
+            )
+        } else {
+            ButtonDefaults.buttonColors(
+                containerColor = appColors.PrimarySage,
+                contentColor = appColors.OnPrimary,
+                disabledContainerColor = appColors.PrimarySageSoft,
+                disabledContentColor = appColors.TextTertiary
+            )
+        },
+        border = if (emphasized) BorderStroke(1.dp, appColors.PrimarySageStrong) else null
     ) {
         Text(text, maxLines = 1)
     }
@@ -3550,7 +3776,8 @@ private fun ComfyThumbnail(
 private fun ComfyImagePreview(
     outputs: List<ComfyOutputFile>,
     initialIndex: Int,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onSave: (ComfyOutputFile) -> Unit = {}
 ) {
     if (outputs.isEmpty()) return
     val context = LocalContext.current
@@ -3561,8 +3788,34 @@ private fun ComfyImagePreview(
     val scope = rememberCoroutineScope()
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
     ) {
+        val dialogView = LocalView.current
+        DisposableEffect(dialogView) {
+            val window = (dialogView.parent as? DialogWindowProvider)?.window
+            if (window != null) {
+                // 预览页是纯黑背景，系统栏也设为透明并关闭系统对比度蒙层，
+                // 让图片/背景一直延伸到屏幕边缘，避免上下出现割裂的分隔带。
+                WindowCompat.setDecorFitsSystemWindows(window, false)
+                @Suppress("DEPRECATION")
+                window.statusBarColor = android.graphics.Color.TRANSPARENT
+                @Suppress("DEPRECATION")
+                window.navigationBarColor = android.graphics.Color.TRANSPARENT
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    @Suppress("DEPRECATION")
+                    window.isStatusBarContrastEnforced = false
+                    window.isNavigationBarContrastEnforced = false
+                }
+                WindowCompat.getInsetsController(window, dialogView).apply {
+                    isAppearanceLightStatusBars = false
+                    isAppearanceLightNavigationBars = false
+                }
+            }
+            onDispose { }
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -3616,7 +3869,13 @@ private fun ComfyImagePreview(
                         }
                     }
                     Box(
-                        modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp)
+                            .pointerInput(file.stableKey()) {
+                                detectTapGestures(onLongPress = {
+                                    Toast.makeText(context, "正在保存到 Download/ComfyUI…", Toast.LENGTH_SHORT).show()
+                                    onSave(file)
+                                })
+                            },
                         contentAlignment = Alignment.Center
                     ) {
                         val result = preview

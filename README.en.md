@@ -78,8 +78,8 @@ TapRelay also serves a ComfyUI control page inside the existing port `1122`. The
 </table>
 </div>
 
-- **Workflow management**: built-in Qwen Image 2.1 workflows (text & image to image, standard editing, high-resolution local editing, Viggle Turbo) plus image decode & obfuscate; import, export, delete, star-to-pin, and long-press drag ordering.
-- **Parameters**: Chinese parameter panels generated from each workflow's `.ui.json`; copy / paste / clear for prompts; upload, thumbnail, and clear for image fields; multi-slot LoRA with custom strengths; a full-screen mask brush for local editing.
+- **Workflow management**: built-in Qwen Image 2.1 regular image edit, Qwen Image 2.1 · Viggle Turbo (6 steps), and image decode & obfuscate; add others through import, with export, delete, star-to-pin, and long-press drag ordering.
+- **Parameters**: Chinese parameter panels generated from each workflow's `.ui.json`; copy / paste / clear for prompts; upload, thumbnail, and clear for image fields; multi-slot LoRA with custom strengths; a full-screen mask brush for image fields.
 - **Running and results**: the run button shows elapsed time and can be stopped; results accumulate per workflow (up to 50 entries) with multi-output paging, a before/after comparison slider, full-screen preview, save to `Download/ComfyUI`, and forwarding to SuYan through the PC.
 - **Title interaction**: the workflow title scrolls automatically so long names stay readable; double-tap to rename, and the new name survives restarts and upgrades.
 - **Gallery**: the **Generated images** entry groups cached images from every workflow for quick review.

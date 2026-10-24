@@ -1,7 +1,7 @@
 {
   "title": "Qwen Image 2.1 · Viggle Turbo（6步）",
   "order": 30,
-  "hideAdvanced": true,
+  "hideAdvanced": false,
   "fields": [
     "65.文本",
     "4.aspect_ratio",
@@ -9,8 +9,6 @@
     "13.unet_name",
     "66.switch",
     "82.switch",
-    "9.batch_size",
-    "12.seed",
     "96.LoRA数量",
     "96.LoRA1名称",
     "96.LoRA1强度",
@@ -92,11 +90,7 @@
     "67.LoRA19名称",
     "67.LoRA19强度",
     "67.LoRA20名称",
-    "67.LoRA20强度",
-    "56.格式",
-    "56.质量",
-    "56.文件名前缀",
-    "56.清除内存"
+    "67.LoRA20强度"
   ],
   "labels": {
     "65.文本": "生成提示词",
@@ -105,14 +99,8 @@
     "13.unet_name": "UNet 名称",
     "66.switch": "文本是否拼接",
     "82.switch": "是否将图像放大",
-    "9.batch_size": "生成张数",
-    "12.seed": "随机种子（-1 自动）",
     "67.LoRA1名称": "编辑增强 LoRA 1",
     "67.LoRA1强度": "编辑增强 LoRA 1 强度",
-    "56.格式": "输出格式",
-    "56.质量": "JPEG 质量",
-    "56.文件名前缀": "保存图像路径",
-    "56.清除内存": "生成后清理显存",
     "96.LoRA数量": "基础模型 LoRA",
     "96.LoRA1名称": "基础模型 LoRA 1",
     "96.LoRA1强度": "基础模型 LoRA 1 强度",

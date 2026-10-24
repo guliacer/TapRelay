@@ -1,7 +1,60 @@
 {
-  "1": {
+  "3": {
     "inputs": {
-      "unet_name": "qwen\\qwen_image_2.1_int8_convrot.safetensors",
+      "value": ""
+    },
+    "class_type": "PrimitiveStringMultiline",
+    "_meta": {
+      "title": "提示词"
+    }
+  },
+  "19": {
+    "inputs": {
+      "image": ""
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "27": {
+    "inputs": {
+      "文件名前缀": "%date:yyyy_MM_dd%/图像",
+      "格式": "JPEG",
+      "压缩模式": "civilblur",
+      "质量": 85,
+      "目标大小KB": 0,
+      "清除内存": true,
+      "图像": [
+        "52",
+        0
+      ]
+    },
+    "class_type": "GGImageCompressSave",
+    "_meta": {
+      "title": "GG 图像压缩保存"
+    }
+  },
+  "28": {
+    "inputs": {
+      "Mode": false,
+      "图像_A": [
+        "27",
+        0
+      ],
+      "图像_B": [
+        "19",
+        0
+      ]
+    },
+    "class_type": "GGImageComparer2",
+    "_meta": {
+      "title": "GG 图像对比 2张"
+    }
+  },
+  "38": {
+    "inputs": {
+      "unet_name": "qwen\\Qwen21-redqw21UNLOCKEDV2TI2I_redqw21UNLOCKEDV2_int8.safetensors",
       "weight_dtype": "default"
     },
     "class_type": "UNETLoader",
@@ -9,7 +62,7 @@
       "title": "Load Diffusion Model"
     }
   },
-  "2": {
+  "39": {
     "inputs": {
       "clip_name": "qwen\\qwen3vl_8b_int8_convrot.safetensors",
       "type": "qwen_image",
@@ -20,7 +73,66 @@
       "title": "Load CLIP"
     }
   },
-  "3": {
+  "40": {
+    "inputs": {
+      "attention": "sageattn",
+      "step_cache": "te_predictor",
+      "reuse_threshold": 0.06,
+      "start_percent": 0,
+      "end_percent": 0,
+      "predictor_error_limit": 0.08,
+      "verbose": false,
+      "model": [
+        "38",
+        0
+      ]
+    },
+    "class_type": "TESpeedQwenImage21",
+    "_meta": {
+      "title": "TE-Speed Qwen Image 2.1"
+    }
+  },
+  "41": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "megapixels": 2.2,
+      "resolution_steps": 32,
+      "image": [
+        "42",
+        1
+      ]
+    },
+    "class_type": "ImageScaleToTotalPixels",
+    "_meta": {
+      "title": "Scale Image to Total Pixels"
+    }
+  },
+  "42": {
+    "inputs": {
+      "遮罩填充": true,
+      "扩展系数上": 1.2,
+      "扩展系数下": 1.2,
+      "扩展系数左": 1.2,
+      "扩展系数右": 1.2,
+      "输出尺寸": "原像素",
+      "自定义宽": 1024,
+      "自定义高": 1024,
+      "倍数取整": 0,
+      "图像": [
+        "19",
+        0
+      ],
+      "遮罩": [
+        "19",
+        1
+      ]
+    },
+    "class_type": "MK_MaskCrop",
+    "_meta": {
+      "title": "MK-遮罩裁剪"
+    }
+  },
+  "43": {
     "inputs": {
       "vae_name": "qwen\\qwen_image_2.1_vae_bf16.safetensors"
     },
@@ -29,70 +141,12 @@
       "title": "Load VAE"
     }
   },
-  "9": {
-    "inputs": {
-      "image": ""
-    },
-    "class_type": "LoadImage",
-    "_meta": {
-      "title": "Load Image"
-    }
-  },
-  "11": {
-    "inputs": {
-      "samples": [
-        "12",
-        0
-      ],
-      "vae": [
-        "3",
-        0
-      ]
-    },
-    "class_type": "VAEDecode",
-    "_meta": {
-      "title": "VAE Decode"
-    }
-  },
-  "12": {
-    "inputs": {
-      "seed": [
-        "17",
-        0
-      ],
-      "steps": 30,
-      "cfg": 1,
-      "sampler_name": "euler",
-      "scheduler": "simple",
-      "denoise": 1,
-      "model": [
-        "14",
-        0
-      ],
-      "positive": [
-        "15",
-        0
-      ],
-      "negative": [
-        "15",
-        1
-      ],
-      "latent_image": [
-        "15",
-        2
-      ]
-    },
-    "class_type": "KSampler",
-    "_meta": {
-      "title": "KSampler"
-    }
-  },
-  "14": {
+  "44": {
     "inputs": {
       "device": "auto",
       "dtype": "default",
       "model": [
-        "33",
+        "47",
         0
       ]
     },
@@ -101,17 +155,20 @@
       "title": "Qwen Image 2.1 Cache"
     }
   },
-  "15": {
+  "45": {
     "inputs": {
-      "prompt": "",
-      "negative_prompt": "artifacts, gpt-image, washed-out colors, low quality, low resolution, AI slop, deviantart, sloppy lines, rough sketch, blurry, indistinct, missing fingers, badly drawn hands, wrong number of fingers",
+      "prompt": [
+        "46",
+        0
+      ],
+      "negative_prompt": "",
       "resolution": 0,
       "clip": [
-        "2",
+        "39",
         0
       ],
       "images.image_1": [
-        "18",
+        "41",
         0
       ]
     },
@@ -120,127 +177,44 @@
       "title": "Text Encode Qwen Image 2.1"
     }
   },
-  "16": {
+  "46": {
     "inputs": {
-      "value": "人物身上的衣服换成蓝色，其它内容不得改变，与原图保持一致性"
-    },
-    "class_type": "PrimitiveStringMultiline",
-    "_meta": {
-      "title": "Text (Multiline)"
-    }
-  },
-  "17": {
-    "inputs": {
-      "seed": -1
-    },
-    "class_type": "Seed (rgthree)",
-    "_meta": {
-      "title": "Seed (rgthree)"
-    }
-  },
-  "18": {
-    "inputs": {
-      "upscale_method": "lanczos",
-      "megapixels": 1.2,
-      "resolution_steps": 32,
-      "image": [
-        "9",
-        0
-      ]
-    },
-    "class_type": "ImageScaleToTotalPixels",
-    "_meta": {
-      "title": "Scale Image to Total Pixels"
-    }
-  },
-  "24": {
-    "inputs": {
-      "image_a": [
-        "18",
+      "任务模式": "图生图",
+      "输出语言": "英文",
+      "增强方式": "本地PE",
+      "api_key": "",
+      "api_base_url": "https://api.deepseek.com",
+      "model": "deepseek-flash",
+      "文生图PE模型": "qwen\\qwen3.5_9b_qwen_image_2.1_pe_t2i.int8_convrot.safetensors",
+      "图生图PE模型": "qwen\\qwen3.5_9b_qwen_image_2.1_pe_i2i.int8_convrot.safetensors",
+      "主模型": "（把 GGUF 模型放到 models/text_encoders 或 models/LLM）",
+      "mmproj": "无",
+      "上下文长度": 8192,
+      "最大生成token": 4096,
+      "seed": 589511739489296,
+      "生成后自动卸载模型": true,
+      "输入提示词": [
+        "3",
         0
       ],
-      "image_b": [
-        "29",
+      "图片.图片1": [
+        "41",
         0
       ]
     },
-    "class_type": "Image Comparer (rgthree)",
+    "class_type": "GGPromptEnhancer",
     "_meta": {
-      "title": "Image Comparer (rgthree)"
+      "title": "GG 提示词增强qwen2.1"
     }
   },
-  "26": {
+  "47": {
     "inputs": {
-      "image": [
-        "11",
-        0
-      ]
-    },
-    "class_type": "SplitImageWithAlpha",
-    "_meta": {
-      "title": "Split Image with Alpha"
-    }
-  },
-  "27": {
-    "inputs": {
-      "image": [
-        "28",
-        0
-      ],
-      "alpha": [
-        "26",
-        1
-      ]
-    },
-    "class_type": "JoinImageWithAlpha",
-    "_meta": {
-      "title": "Join Image with Alpha"
-    }
-  },
-  "28": {
-    "inputs": {
-      "method": "mkl",
-      "image_output": "Hide",
-      "save_prefix": "ComfyUI",
-      "image_ref": [
-        "18",
-        0
-      ],
-      "image_target": [
-        "26",
-        0
-      ]
-    },
-    "class_type": "easy imageColorMatch",
-    "_meta": {
-      "title": "Image Color Match"
-    }
-  },
-  "29": {
-    "inputs": {
-      "switch": false,
-      "on_false": [
-        "11",
-        0
-      ],
-      "on_true": [
-        "27",
-        0
-      ]
-    },
-    "class_type": "ComfySwitchNode",
-    "_meta": {
-      "title": "If/Else Switch"
-    }
-  },
-  "33": {
-    "inputs": {
-      "LoRA数量": 3,
-      "LoRA1名称": "qwen\\p_qwen_image_2.1_8step_v0.1.safetensors",
+      "LoRA数量": 2,
+      "LoRA1名称": "qwen\\Qwen-Image-2.1 NSFW Image Edit.safetensors",
       "LoRA1强度": 1,
       "LoRA2名称": "qwen\\Qwen21-无位移一致性consistency.safetensors",
       "LoRA2强度": 1,
-      "LoRA3名称": "qwen\\Qwen21-换身bfs_body_swap_v1.0_qwen_2.1.safetensors",
+      "LoRA3名称": "None",
       "LoRA3强度": 1,
       "LoRA4名称": "None",
       "LoRA4强度": 1,
@@ -277,7 +251,7 @@
       "LoRA20名称": "None",
       "LoRA20强度": 1,
       "模型": [
-        "1",
+        "40",
         0
       ]
     },
@@ -286,38 +260,80 @@
       "title": "GG LoRA自定义加载"
     }
   },
-  "35": {
+  "50": {
     "inputs": {
-      "文件名前缀": "%date:yyyy_MM_dd%/图像",
-      "格式": "JPEG",
-      "压缩模式": "civilblur",
-      "质量": 85,
-      "目标大小KB": 0,
-      "清除内存": true,
-      "图像": [
-        "29",
-        0
-      ]
-    },
-    "class_type": "GGImageCompressSave",
-    "_meta": {
-      "title": "GG 图像压缩保存"
-    }
-  },
-  "36": {
-    "inputs": {
-      "图像_A": [
-        "18",
+      "seed": 76172933096255,
+      "steps": 25,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "44",
         0
       ],
-      "图像_B": [
-        "29",
+      "positive": [
+        "45",
+        0
+      ],
+      "negative": [
+        "45",
+        1
+      ],
+      "latent_image": [
+        "45",
+        2
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "51": {
+    "inputs": {
+      "samples": [
+        "50",
+        0
+      ],
+      "vae": [
+        "43",
         0
       ]
     },
-    "class_type": "GGImageComparer2",
+    "class_type": "VAEDecode",
     "_meta": {
-      "title": "GG 图像对比 2张"
+      "title": "VAE Decode"
+    }
+  },
+  "52": {
+    "inputs": {
+      "遮罩扩展百分比": 4,
+      "遮罩羽化百分比": 5,
+      "颜色还原强度": 1,
+      "接缝": [
+        "42",
+        0
+      ],
+      "裁剪图像": [
+        "51",
+        0
+      ]
+    },
+    "class_type": "MK_CropRestore",
+    "_meta": {
+      "title": "MK-裁剪恢复"
+    }
+  },
+  "58": {
+    "inputs": {
+      "method": "wavelet",
+      "image_output": "Preview",
+      "save_prefix": "ComfyUI"
+    },
+    "class_type": "easy imageColorMatch",
+    "_meta": {
+      "title": "Image Color Match"
     }
   }
 }

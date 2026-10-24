@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.webkit.MimeTypeMap
+import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import java.io.File
 import java.io.FileOutputStream
@@ -20,11 +21,17 @@ object ComfyImageSaver {
     const val SAVE_PATH = "Download/ComfyUI"
 
     @Suppress("DEPRECATION")
-    fun save(context: Context, sourceName: String, sourceFile: File): String {
+    fun save(
+        context: Context,
+        sourceName: String,
+        sourceFile: File,
+        replaceExisting: Boolean = false
+    ): String {
         require(sourceFile.isFile && sourceFile.length() > 0L) { "图片内容为空" }
         val name = createDisplayName(sourceName)
         val mimeType = mimeTypeFor(name)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if (replaceExisting) deleteExisting(context, sourceName)
             return saveWithMediaStore(context, name, mimeType, sourceFile)
         }
         if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.WRITE_EXTERNAL_STORAGE) !=
@@ -37,6 +44,10 @@ object ComfyImageSaver {
         val directory = File(downloads, "ComfyUI")
         if (!directory.exists() && !directory.mkdirs()) {
             throw IOException("无法创建 Download/ComfyUI 目录")
+        }
+        if (replaceExisting) {
+            directory.listFiles { f -> f.name.endsWith("_" + safeBasename(sourceName)) }
+                ?.forEach { f -> f.delete() }
         }
         val destination = File(directory, name)
         sourceFile.inputStream().buffered().use { input ->
@@ -51,7 +62,25 @@ object ComfyImageSaver {
         return SAVE_PATH
     }
 
+    /** 该源文件是否已经保存到 Download/ComfyUI（按文件名比对，忽略时间戳前缀）。 */
+    fun isSaved(context: Context, sourceName: String): Boolean {
+        val basename = safeBasename(sourceName)
+        val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        val directory = File(downloads, "ComfyUI")
+        return directory.isDirectory &&
+            directory.listFiles { f -> f.name.endsWith("_$basename") }?.isNotEmpty() == true
+    }
+
     @Suppress("DEPRECATION")
+    private fun deleteExisting(context: Context, sourceName: String) {
+        val basename = safeBasename(sourceName)
+        val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        val directory = File(downloads, "ComfyUI")
+        directory.listFiles { f -> f.name.endsWith("_$basename") }?.forEach { f -> f.delete() }
+    }
+
+    @Suppress("DEPRECATION")
+    @RequiresApi(Build.VERSION_CODES.Q)
     private fun saveWithMediaStore(context: Context, name: String, mimeType: String, sourceFile: File): String {
         val resolver = context.contentResolver
         // Android 10+ 的 Images 集合不允许以 Download 为顶层目录，必须写入 Downloads 集合。
@@ -88,10 +117,14 @@ object ComfyImageSaver {
     }
 
     private fun createDisplayName(sourceName: String): String {
+        val basename = safeBasename(sourceName)
+        return "${System.currentTimeMillis()}_$basename"
+    }
+
+    private fun safeBasename(sourceName: String): String {
         val basename = sourceName.substringAfterLast('/').substringAfterLast('\\')
-        val safeName = basename.replace(Regex("[\\u0000-\\u001F<>:\"/\\\\|?*]"), "_")
+        return basename.replace(Regex("[\\u0000-\\u001F<>:\"/\\\\|?*]"), "_")
             .ifBlank { "comfyui.png" }
-        return "${System.currentTimeMillis()}_$safeName"
     }
 
     private fun mimeTypeFor(filename: String): String {

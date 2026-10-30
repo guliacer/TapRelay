@@ -4,7 +4,19 @@
 
 **把 Windows PC 上的 AI 任务状态推送到 Android，并在手机上控制 ComfyUI。**
 
-[English README](./README.en.md)
+[English README](./docs/README.en.md)
+
+## 项目预览
+
+> 一眼看懂 TapRelay：PC 桌面端把 AI 任务状态实时推送到手机，手机端还能直接控制 ComfyUI 工作流。
+
+| Windows 桌面端 | Android · 任务通知 |
+| --- | --- |
+| ![TapRelay 桌面端](./assets/readme/screenshot-pc.png) | ![Android 任务通知](./assets/readme/screenshot-tasks.png) |
+
+| Android · ComfyUI 工作流 | Android · 设备管理 |
+| --- | --- |
+| ![Android ComfyUI 工作流](./assets/readme/screenshot-comfyui.png) | ![Android 设备管理](./assets/readme/screenshot-device.png) |
 
 ## 功能
 

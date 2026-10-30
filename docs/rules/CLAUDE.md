@@ -6,56 +6,56 @@
 ## 规则条目
 
 ### R1: 规则读取顺序
-**断言**：任何 AI Coder 在新增、修改或删除项目文件前，必须先读取 `W:\TapRelay\AGENTS.md` 和 `W:\TapRelay\CLAUDE.md`，再读取本文件列出的相关编号规则文件；若入口文件与编号规则文件冲突，以编号规则文件为准。
+**断言**：任何 AI Coder 在新增、修改或删除项目文件前，必须先读取 `W:\TapRelay\docs\rules\AGENTS.md` 和 `W:\TapRelay\docs\rules\CLAUDE.md`，再读取本文件列出的相关编号规则文件；若入口文件与编号规则文件冲突，以编号规则文件为准。
 **示例**：
 ```text
 必须读取:
-W:\TapRelay\AGENTS.md
-W:\TapRelay\CLAUDE.md
-W:\TapRelay\01-人设与开发准则.md
-W:\TapRelay\02-技术栈与核心库.md
-W:\TapRelay\03-目录与架构规范.md
-W:\TapRelay\04-核心铁律与避坑.md
+W:\TapRelay\docs\rules\AGENTS.md
+W:\TapRelay\docs\rules\CLAUDE.md
+W:\TapRelay\docs\rules\01-人设与开发准则.md
+W:\TapRelay\docs\rules\02-技术栈与核心库.md
+W:\TapRelay\docs\rules\03-目录与架构规范.md
+W:\TapRelay\docs\rules\04-核心铁律与避坑.md
 
 涉及 Android UI 时追加:
-W:\TapRelay\05-UI与组件规范.md
+W:\TapRelay\docs\rules\05-UI与组件规范.md
 
 涉及 HTTP/WebSocket 时追加:
-W:\TapRelay\06-通信与数据获取规范.md
+W:\TapRelay\docs\rules\06-通信与数据获取规范.md
 
 涉及本地状态/消息历史时追加:
-W:\TapRelay\08-数据库与状态管理规范.md
+W:\TapRelay\docs\rules\08-数据库与状态管理规范.md
 
 涉及 ComfyUI 手机工作流适配(api_workflows 下新增/更新工作流)时追加:
-W:\TapRelay\11-应用识别与适配规则.md(R8)
+W:\TapRelay\docs\rules\11-应用识别与适配规则.md(R8)
 
 涉及通用应用适配机制时追加:
-W:\TapRelay\11-应用识别与适配规则.md
+W:\TapRelay\docs\rules\11-应用识别与适配规则.md
 W:\TapRelay\.zcode\skills\adapt-app\SKILL.md
 
 排查缺陷或做性能/行为修正时追加（必须先读，用于复用已知根因）:
-W:\TapRelay\09-问题与优化记录.md（目录）
-W:\TapRelay\09-问题与优化记录-内容.md（按目录主题读取）
-W:\TapRelay\11-应用识别与适配规则.md
+W:\TapRelay\docs\rules\09-问题与优化记录.md（目录）
+W:\TapRelay\docs\rules\09-问题与优化记录-内容.md（按目录主题读取）
+W:\TapRelay\docs\rules\11-应用识别与适配规则.md
 ```
-**违规特征**：未读取两个规则入口和相关编号规则文件就改动 `pc-app/`、`notify-server/`、`android-app/` 或 `.zcode/`；在规则冲突时按 `CLAUDE.md` 覆盖编号文件；排障时跳过 `09-问题与优化记录.md` 目录和 `09-问题与优化记录-内容.md` 对应主题，直接重新定位已收录的问题。
+**违规特征**：未读取两个规则入口和相关编号规则文件就改动 `pc-app/`、`notify-server/`、`android-app/` 或 `.zcode/`；在规则冲突时按 `CLAUDE.md` 覆盖编号文件；排障时跳过 `docs/rules/09-问题与优化记录.md` 目录和 `docs/rules/09-问题与优化记录-内容.md` 对应主题，直接重新定位已收录的问题。
 
 ### R2: 规则文件索引
-**断言**：项目规则只允许维护在 `W:\TapRelay\AGENTS.md`、`W:\TapRelay\CLAUDE.md` 与 `W:\TapRelay\NN-*.md` 编号文件中；不得把长期架构规则散落到源码注释、README 或临时聊天记录。
+**断言**：项目规则只允许维护在 `W:\TapRelay\docs\rules\AGENTS.md`、`W:\TapRelay\docs\rules\CLAUDE.md` 与 `W:\TapRelay\docs\rules\NN-*.md` 编号文件中；规则入口 `AGENTS.md`、`CLAUDE.md` 已迁至 `docs/rules/`，根目录只保留 `README*.md`。长期架构规则不得散落到源码注释、README 或临时聊天记录。
 **示例**：
 ```text
-W:\TapRelay\01-人设与开发准则.md
-W:\TapRelay\02-技术栈与核心库.md
-W:\TapRelay\03-目录与架构规范.md
-W:\TapRelay\04-核心铁律与避坑.md
-W:\TapRelay\05-UI与组件规范.md
-W:\TapRelay\06-通信与数据获取规范.md
-W:\TapRelay\08-数据库与状态管理规范.md
-W:\TapRelay\09-问题与优化记录.md
-W:\TapRelay\09-问题与优化记录-内容.md
-W:\TapRelay\11-应用识别与适配规则.md
+W:\TapRelay\docs\rules\01-人设与开发准则.md
+W:\TapRelay\docs\rules\02-技术栈与核心库.md
+W:\TapRelay\docs\rules\03-目录与架构规范.md
+W:\TapRelay\docs\rules\04-核心铁律与避坑.md
+W:\TapRelay\docs\rules\05-UI与组件规范.md
+W:\TapRelay\docs\rules\06-通信与数据获取规范.md
+W:\TapRelay\docs\rules\08-数据库与状态管理规范.md
+W:\TapRelay\docs\rules\09-问题与优化记录.md
+W:\TapRelay\docs\rules\09-问题与优化记录-内容.md
+W:\TapRelay\docs\rules\11-应用识别与适配规则.md
 ```
-**违规特征**：把“服务端端口固定为 1122”只写在 `notify-server/server.js` 注释中；新增 `docs/rules.md` 但不更新本入口文件；把已定位的缺陷根因只留在对话里而不写入 `09-问题与优化记录.md`。
+**违规特征**：把“服务端端口固定为 1122”只写在 `notify-server/server.js` 注释中；在 `docs/rules/` 新增编号文件但不更新本入口文件与 `docs/README.md` 索引；把已定位的缺陷根因只留在对话里而不写入 `docs/rules/09-问题与优化记录.md`。
 
 ### R3: 项目边界
 **断言**：本项目的可交付代码边界固定为 `W:\TapRelay\pc-app`、`W:\TapRelay\notify-server`、`W:\TapRelay\android-app`、`W:\TapRelay\.zcode\skills\notify-phone` 和 `W:\TapRelay\.zcode\skills\adapt-app`；除规则文件外，不得在项目根目录新增业务源码文件。

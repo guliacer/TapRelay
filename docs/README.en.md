@@ -4,7 +4,7 @@
 
 **Push AI task status from Windows to Android and control ComfyUI from the phone.**
 
-[中文 README](./README.md)
+[中文 README](../README.md)
 
 ## Features
 

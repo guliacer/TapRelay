@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -32,6 +33,9 @@ import com.lan.notify.data.ConnectionQrCodec
 import com.lan.notify.data.MessageRepository
 import com.lan.notify.data.NotifyMessage
 import com.lan.notify.data.RelayConfig
+import com.lan.notify.data.UpdateChecker
+import com.lan.notify.data.UpdatePromptStore
+import com.lan.notify.data.UpdateRelease
 import com.lan.notify.data.safeActionUri
 import com.lan.notify.notification.NotificationHelper
 import com.lan.notify.service.WebSocketService
@@ -40,6 +44,7 @@ import com.lan.notify.ui.ComfyUiScreen
 import com.lan.notify.ui.AppDestination
 import com.lan.notify.ui.DeviceScreen
 import com.lan.notify.ui.PermissionCheckScreen
+import com.lan.notify.ui.UpdateDialog
 import com.lan.notify.ui.WorkstationShell
 import com.lan.notify.ui.theme.NotifyTheme
 import com.lan.notify.util.AutoStartHelper
@@ -110,6 +115,14 @@ class MainActivity : ComponentActivity() {
             val deviceName by MessageRepository.deviceName.collectAsState()
             val hostHistory by MessageRepository.hostHistory.collectAsState()
             val hostMasked by MessageRepository.hostMasked.collectAsState()
+            val updatePromptStore = remember { UpdatePromptStore(this@MainActivity) }
+            var updateRelease by remember { mutableStateOf<UpdateRelease?>(null) }
+            LaunchedEffect(Unit) {
+                val release = UpdateChecker.fetchLatest()
+                if (release != null && updatePromptStore.shouldPrompt(release.version)) {
+                    updateRelease = release
+                }
+            }
             // 首次启动自动进入权限向导（onboarding 模式），用户完成/跳过后才进主界面。
             var showPermissionCheck by remember { mutableStateOf(!MessageRepository.isOnboardingDone) }
             var activeDestination by rememberSaveable { mutableStateOf(AppDestination.TASK) }
@@ -207,6 +220,25 @@ class MainActivity : ComponentActivity() {
                             onOpenAutoStartSettings = ::openAutoStartSettings
                         )
                     }
+                    updateRelease?.let { release ->
+                        UpdateDialog(
+                            release = release,
+                            currentVersion = UpdateChecker.currentVersion,
+                            onOpenUpdate = {
+                                updateRelease = null
+                                openExternalUrl(release.targetUrl)
+                            },
+                            onSkipOnce = {
+                                updatePromptStore.skipVersion(release.version)
+                                updateRelease = null
+                            },
+                            onNeverPrompt = {
+                                updatePromptStore.neverPrompt()
+                                updateRelease = null
+                            },
+                            onDismiss = { updateRelease = null }
+                        )
+                    }
                 }
             }
         }
@@ -252,6 +284,16 @@ class MainActivity : ComponentActivity() {
         }
         intent?.removeExtra(EXTRA_MESSAGE_ID)
         intent?.removeExtra(EXTRA_MESSAGE_ACTION_URL)
+    }
+
+    private fun openExternalUrl(rawUrl: String) {
+        val uri = runCatching { Uri.parse(rawUrl) }.getOrNull() ?: return
+        if (uri.scheme != "http" && uri.scheme != "https") return
+        runCatching {
+            startActivity(Intent(Intent.ACTION_VIEW, uri))
+        }.onFailure {
+            Toast.makeText(this, "无法打开更新链接", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun markMessageRead(messageId: String) {

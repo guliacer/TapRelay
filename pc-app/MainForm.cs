@@ -94,6 +94,7 @@ namespace TapRelay
                 "pc-server.log"));
         private RemoteRelayBridge? _relayBridge;
         private readonly UiState _uiState = UiStateStore.Load();
+        private bool _updateCheckStarted;
         private readonly AgentCompletionMonitor _agentMonitor;
         private readonly ProcessLifecycleMonitor _processLifecycleMonitor;
         private readonly ClaudeHahaPermissionBridge _hahaPermissionBridge;
@@ -494,6 +495,59 @@ namespace TapRelay
             else
             {
                 _logScrollBar.Visible = false;
+            }
+            _ = CheckForUpdatesAsync();
+        }
+
+        private async Task CheckForUpdatesAsync()
+        {
+            if (_updateCheckStarted)
+            {
+                return;
+            }
+
+            _updateCheckStarted = true;
+            var release = await UpdateChecker.TryGetLatestAsync();
+            if (release == null || IsDisposed || Disposing ||
+                _uiState.NeverPromptUpdates ||
+                string.Equals(_uiState.SkippedUpdateVersion, release.Version, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            using var dialog = new UpdateDialog(release, UpdateChecker.CurrentVersion);
+            dialog.ShowDialog(this);
+            switch (dialog.Result)
+            {
+                case UpdateDialogResult.Update:
+                    OpenExternalUrl(release.TargetUrl);
+                    break;
+                case UpdateDialogResult.SkipOnce:
+                    _uiState.SkippedUpdateVersion = release.Version;
+                    SaveUiState();
+                    break;
+                case UpdateDialogResult.Never:
+                    _uiState.NeverPromptUpdates = true;
+                    SaveUiState();
+                    break;
+            }
+        }
+
+        private void OpenExternalUrl(string url)
+        {
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
+                (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            {
+                return;
+            }
+
+            try
+            {
+                Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
+            }
+            catch (Exception error)
+            {
+                MessageBox.Show(this, "无法打开更新链接：" + error.Message, "打开更新失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 

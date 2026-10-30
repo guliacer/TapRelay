@@ -19,6 +19,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import com.journeyapps.barcodescanner.ScanContract
@@ -32,7 +33,10 @@ import com.lan.notify.notification.NotificationHelper
 import com.lan.notify.service.WebSocketService
 import com.lan.notify.ui.MainScreen
 import com.lan.notify.ui.ComfyUiScreen
+import com.lan.notify.ui.AppDestination
+import com.lan.notify.ui.DeviceScreen
 import com.lan.notify.ui.PermissionCheckScreen
+import com.lan.notify.ui.WorkstationShell
 import com.lan.notify.ui.theme.NotifyTheme
 import com.lan.notify.util.AutoStartHelper
 
@@ -95,7 +99,7 @@ class MainActivity : ComponentActivity() {
             val hostMasked by MessageRepository.hostMasked.collectAsState()
             // 首次启动自动进入权限向导（onboarding 模式），用户完成/跳过后才进主界面。
             var showPermissionCheck by remember { mutableStateOf(!MessageRepository.isOnboardingDone) }
-            var showComfyUi by remember { mutableStateOf(false) }
+            var activeDestination by rememberSaveable { mutableStateOf(AppDestination.TASK) }
             NotifyTheme(themeMode = themeMode) {
                 val uiState by MessageRepository.state.collectAsState()
                 BackHandler(enabled = showPermissionCheck) {
@@ -111,50 +115,76 @@ class MainActivity : ComponentActivity() {
                         },
                         onOpenAutoStartSettings = ::openAutoStartSettings
                     )
-                } else if (showComfyUi) {
-                    BackHandler { showComfyUi = false }
-                    ComfyUiScreen(
-                        serverHost = uiState.serverHost,
-                        onBack = { showComfyUi = false }
-                    )
                 } else {
-                    MainScreen(
-                        uiState = uiState,
-                        themeMode = themeMode,
-                        onThemeModeChange = MessageRepository::setThemeMode,
-                        listMode = listMode,
-                        onListModeChange = MessageRepository::setListMode,
-                        projectExpandCounts = projectExpandCounts,
-                        onSetProjectExpandCount = MessageRepository::setProjectExpandCount,
-                        onServerHostChange = MessageRepository::updateServerHost,
-                        onScanQr = ::scanConnectionQr,
-                        onConnect = { startSocketService(WebSocketService.ACTION_CONNECT) },
-                        onDisconnect = { startSocketService(WebSocketService.ACTION_DISCONNECT) },
-                        onSleep = { sendPcPowerCommand(WebSocketService.PC_POWER_SLEEP) },
-                        onShutdown = ::confirmPcShutdown,
-                        onOpenPermissionCheck = { showPermissionCheck = true },
-                        onMarkMessageRead = ::markMessageRead,
-                        onMarkAllMessagesRead = ::markAllMessagesRead,
-                        onResolveApproval = ::resolveApprovalFromMessage,
-                        onProcessWaiting = ::processWaitingMessage,
-                        dynamicEffectsEnabled = dynamicEffectsEnabled,
-                        onDynamicEffectsChange = MessageRepository::setDynamicEffectsEnabled,
-                        deviceName = deviceName,
-                        onDeviceNameChange = MessageRepository::setDeviceName,
-                        hostHistory = hostHistory,
-                        hostMasked = hostMasked,
-                        onHostMaskedChange = MessageRepository::setHostMasked,
-                        onClearHostHistory = MessageRepository::clearHostHistory,
-                        onClearHistory = {
-                            NotificationHelper.clearTaskNotifications(
-                                this,
-                                MessageRepository.state.value.messages
+                    WorkstationShell(
+                        active = activeDestination,
+                        onSelect = { activeDestination = it },
+                        task = {
+                            MainScreen(
+                                uiState = uiState,
+                                themeMode = themeMode,
+                                onThemeModeChange = MessageRepository::setThemeMode,
+                                listMode = listMode,
+                                onListModeChange = MessageRepository::setListMode,
+                                projectExpandCounts = projectExpandCounts,
+                                onSetProjectExpandCount = MessageRepository::setProjectExpandCount,
+                                onServerHostChange = MessageRepository::updateServerHost,
+                                onScanQr = ::scanConnectionQr,
+                                onConnect = { startSocketService(WebSocketService.ACTION_CONNECT) },
+                                onDisconnect = { startSocketService(WebSocketService.ACTION_DISCONNECT) },
+                                onSleep = { sendPcPowerCommand(WebSocketService.PC_POWER_SLEEP) },
+                                onShutdown = ::confirmPcShutdown,
+                                onOpenPermissionCheck = { showPermissionCheck = true },
+                                onMarkMessageRead = ::markMessageRead,
+                                onMarkAllMessagesRead = ::markAllMessagesRead,
+                                onResolveApproval = ::resolveApprovalFromMessage,
+                                onProcessWaiting = ::processWaitingMessage,
+                                dynamicEffectsEnabled = dynamicEffectsEnabled,
+                                onDynamicEffectsChange = MessageRepository::setDynamicEffectsEnabled,
+                                deviceName = deviceName,
+                                onDeviceNameChange = MessageRepository::setDeviceName,
+                                hostHistory = hostHistory,
+                                hostMasked = hostMasked,
+                                onHostMaskedChange = MessageRepository::setHostMasked,
+                                onClearHostHistory = MessageRepository::clearHostHistory,
+                                onClearHistory = {
+                                    NotificationHelper.clearTaskNotifications(
+                                        this,
+                                        MessageRepository.state.value.messages
+                                    )
+                                    MessageRepository.clearMessages()
+                                },
+                                onOpenComfyUi = {
+                                    activeDestination = AppDestination.COMFY_UI
+                                },
                             )
-                            MessageRepository.clearMessages()
                         },
-                        onOpenComfyUi = {
-                            showComfyUi = true
+                        comfyUi = {
+                            ComfyUiScreen(
+                                serverHost = uiState.serverHost,
+                                onBack = { activeDestination = AppDestination.TASK }
+                            )
                         },
+                        device = {
+                            DeviceScreen(
+                                uiState = uiState,
+                                deviceName = deviceName,
+                                onDeviceNameChange = MessageRepository::setDeviceName,
+                                onServerHostChange = MessageRepository::updateServerHost,
+                                dynamicEffectsEnabled = dynamicEffectsEnabled,
+                                onDynamicEffectsChange = MessageRepository::setDynamicEffectsEnabled,
+                                onScanQr = ::scanConnectionQr,
+                                onConnect = { startSocketService(WebSocketService.ACTION_CONNECT) },
+                                onDisconnect = { startSocketService(WebSocketService.ACTION_DISCONNECT) },
+                                onSleep = { sendPcPowerCommand(WebSocketService.PC_POWER_SLEEP) },
+                                onShutdown = ::confirmPcShutdown,
+                                onOpenPermissionCheck = { showPermissionCheck = true },
+                                hostHistory = hostHistory,
+                                hostMasked = hostMasked,
+                                onHostMaskedChange = MessageRepository::setHostMasked,
+                                onClearHostHistory = MessageRepository::clearHostHistory
+                            )
+                        }
                     )
                 }
             }

@@ -15,12 +15,15 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
@@ -109,16 +112,7 @@ class MainActivity : ComponentActivity() {
                 BackHandler(enabled = !showPermissionCheck && activeDestination != AppDestination.TASK) {
                     activeDestination = AppDestination.TASK
                 }
-                if (showPermissionCheck) {
-                    PermissionCheckScreen(
-                        onboarding = !MessageRepository.isOnboardingDone,
-                        onBack = {
-                            showPermissionCheck = false
-                            MessageRepository.completeOnboarding()
-                        },
-                        onOpenAutoStartSettings = ::openAutoStartSettings
-                    )
-                } else {
+                Box(Modifier.fillMaxSize()) {
                     WorkstationShell(
                         active = activeDestination,
                         onSelect = { activeDestination = it },
@@ -155,7 +149,7 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onClearHistory = {
                                     NotificationHelper.clearTaskNotifications(
-                                        this,
+                                        this@MainActivity,
                                         MessageRepository.state.value.messages
                                     )
                                     MessageRepository.clearMessages()
@@ -193,6 +187,16 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                     )
+                    if (showPermissionCheck) {
+                        PermissionCheckScreen(
+                            onboarding = !MessageRepository.isOnboardingDone,
+                            onBack = {
+                                showPermissionCheck = false
+                                MessageRepository.completeOnboarding()
+                            },
+                            onOpenAutoStartSettings = ::openAutoStartSettings
+                        )
+                    }
                 }
             }
         }

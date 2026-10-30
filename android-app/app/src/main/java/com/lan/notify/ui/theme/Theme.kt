@@ -8,6 +8,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
+import androidx.compose.ui.graphics.toArgb
 
 /**
  * 全局主题入口。
@@ -38,8 +39,14 @@ fun NotifyTheme(
         val activity = view.context as? Activity
         if (activity != null) {
             SideEffect {
-                WindowCompat.getInsetsController(activity.window, view)
-                    .isAppearanceLightStatusBars = !isDark
+                WindowCompat.getInsetsController(activity.window, view).apply {
+                    isAppearanceLightStatusBars = !isDark
+                    isAppearanceLightNavigationBars = !isDark
+                }
+                // Edge-to-edge 下系统栏会直接叠在 Compose 内容上。
+                // 使用与工作台顶栏/底栏一致的颜色，避免真机状态栏透出页面背景形成白色断层。
+                activity.window.statusBarColor = appColors.TopBarSage.toArgb()
+                activity.window.navigationBarColor = appColors.Surface.toArgb()
             }
         }
     }

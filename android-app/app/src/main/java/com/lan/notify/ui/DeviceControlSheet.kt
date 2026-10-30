@@ -154,196 +154,236 @@ fun DeviceControlSheet(
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    // 历史地址列表页与设备管理主页面共用同一个面板，用换页而不是嵌套第二个
-    // ModalBottomSheet：双层 scrim 会叠压，返回键也会被外层 onDismissRequest 先吃掉。
-    var showHostHistory by remember { mutableStateOf(false) }
-    var confirmClearHistory by remember { mutableStateOf(false) }
-
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(start = 20.dp, end = 20.dp, bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            if (showHostHistory) {
-                HostHistorySection(
-                    entries = hostHistory,
-                    currentHost = uiState.serverHost,
-                    masked = hostMasked,
-                    onBack = { showHostHistory = false },
-                    onPick = { host ->
-                        onServerHostChange(host)
-                        onConnect()
-                        onDismiss()
-                    },
-                    onRequestClear = { confirmClearHistory = true }
-                )
-                return@Column
-            }
+        DeviceControlContent(
+            uiState = uiState,
+            deviceName = deviceName,
+            onDeviceNameChange = onDeviceNameChange,
+            onServerHostChange = onServerHostChange,
+            dynamicEffectsEnabled = dynamicEffectsEnabled,
+            onDynamicEffectsChange = onDynamicEffectsChange,
+            onScanQr = onScanQr,
+            onConnect = onConnect,
+            onDisconnect = onDisconnect,
+            onSleep = onSleep,
+            onShutdown = onShutdown,
+            onOpenPermissionCheck = onOpenPermissionCheck,
+            hostHistory = hostHistory,
+            hostMasked = hostMasked,
+            onHostMaskedChange = onHostMaskedChange,
+            onClearHostHistory = onClearHostHistory,
+            onDismiss = onDismiss
+        )
+    }
+}
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "设备管理",
-                        color = appColors.TextPrimary,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "连接保障和低频控制",
-                        color = appColors.TextSecondary,
-                        fontSize = 12.sp
-                    )
-                }
-                TextButton(onClick = onDismiss) {
+@Composable
+fun DeviceControlContent(
+    uiState: AppUiState,
+    deviceName: String,
+    onDeviceNameChange: (String) -> Unit,
+    onServerHostChange: (String) -> Unit,
+    dynamicEffectsEnabled: Boolean,
+    onDynamicEffectsChange: (Boolean) -> Unit,
+    onScanQr: () -> Unit,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit,
+    onSleep: () -> Unit,
+    onShutdown: () -> Unit,
+    onOpenPermissionCheck: () -> Unit,
+    hostHistory: List<HostHistoryEntry> = emptyList(),
+    hostMasked: Boolean = false,
+    onHostMaskedChange: (Boolean) -> Unit = {},
+    onClearHostHistory: () -> Unit = {},
+    onDismiss: (() -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    // 历史地址列表页与设备管理主页面共用同一个内容区域，用换页而不是嵌套
+    // ModalBottomSheet，避免双层 scrim 和返回键争抢。
+    var showHostHistory by remember { mutableStateOf(false) }
+    var confirmClearHistory by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(start = 20.dp, end = 20.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        if (showHostHistory) {
+            HostHistorySection(
+                entries = hostHistory,
+                currentHost = uiState.serverHost,
+                masked = hostMasked,
+                onBack = { showHostHistory = false },
+                onPick = { host ->
+                    onServerHostChange(host)
+                    onConnect()
+                    onDismiss?.invoke()
+                },
+                onRequestClear = { confirmClearHistory = true }
+            )
+            return@Column
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "设备管理",
+                    color = appColors.TextPrimary,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "连接保障和低频控制",
+                    color = appColors.TextSecondary,
+                    fontSize = 12.sp
+                )
+            }
+            onDismiss?.let { dismiss ->
+                TextButton(onClick = dismiss) {
                     Text("完成", color = appColors.PrimarySage)
                 }
             }
+        }
 
-            DeviceSectionTitle("设备信息")
-            // 脱敏开启时输入框必须只读：否则 onValueChange 会把 `1**.1**.*.3*` 这种
-            // 掩码串当成真实地址写回 serverHost，直接污染连接配置。
-            OutlinedTextField(
-                value = if (hostMasked) maskIp(uiState.serverHost) else uiState.serverHost,
-                onValueChange = onServerHostChange,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("PC 地址（IP / 域名）") },
-                supportingText = { Text("默认端口：1122") },
-                singleLine = true,
-                readOnly = hostMasked
+        DeviceSectionTitle("设备信息")
+        // 脱敏开启时输入框必须只读：否则 onValueChange 会把掩码串写回 serverHost。
+        OutlinedTextField(
+            value = if (hostMasked) maskIp(uiState.serverHost) else uiState.serverHost,
+            onValueChange = onServerHostChange,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("PC 地址（IP / 域名）") },
+            supportingText = { Text("默认端口：1122") },
+            singleLine = true,
+            readOnly = hostMasked
+        )
+        OutlinedTextField(
+            value = deviceName,
+            onValueChange = onDeviceNameChange,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("设备名称") },
+            placeholder = { Text(LocalStore.DEFAULT_DEVICE_NAME) },
+            supportingText = { Text("首页只显示此名称，最多 40 个字符") },
+            singleLine = true
+        )
+        PlainButton(
+            text = "扫码更新地址",
+            onClick = onScanQr,
+            modifier = Modifier.fillMaxWidth(),
+            variant = PlainButtonVariant.SECONDARY
+        )
+        DeviceSettingRow(
+            title = "历史地址",
+            detail = if (hostHistory.isEmpty()) {
+                "连接成功后会自动记录"
+            } else {
+                "最近使用的 ${hostHistory.size} 个地址"
+            },
+            action = {
+                PlainButton(
+                    text = "查看",
+                    onClick = { showHostHistory = true },
+                    variant = PlainButtonVariant.SMALL
+                )
+            }
+        )
+
+        HorizontalDivider(color = appColors.BorderSoft)
+        DeviceSectionTitle("连接管理")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "消息通道",
+                    color = appColors.TextPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    text = connectionDetail(
+                        status = uiState.connectionStatus,
+                        displayedHost = if (hostMasked) maskIp(uiState.serverHost) else uiState.serverHost
+                    ),
+                    color = connectionStatusColor(uiState.connectionStatus),
+                    fontSize = 11.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            ConnectionAction(
+                status = uiState.connectionStatus,
+                enabled = uiState.serverHost.isNotBlank(),
+                onConnect = onConnect,
+                onDisconnect = onDisconnect
             )
-            OutlinedTextField(
-                value = deviceName,
-                onValueChange = onDeviceNameChange,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("设备名称") },
-                placeholder = { Text(LocalStore.DEFAULT_DEVICE_NAME) },
-                supportingText = { Text("首页只显示此名称，最多 40 个字符") },
-                singleLine = true
-            )
+        }
+
+        HorizontalDivider(color = appColors.BorderSoft)
+        DeviceSectionTitle("系统设置")
+        DeviceSettingRow(
+            title = "权限状态",
+            detail = "检查通知、悬浮窗和后台运行权限",
+            action = {
+                PlainButton(
+                    text = "检查权限",
+                    onClick = onOpenPermissionCheck,
+                    variant = PlainButtonVariant.SMALL
+                )
+            }
+        )
+        DeviceSettingRow(
+            title = "省电模式",
+            detail = if (dynamicEffectsEnabled) "当前使用完整动效" else "已减少动效，降低耗电",
+            action = {
+                Switch(
+                    checked = !dynamicEffectsEnabled,
+                    onCheckedChange = { powerSave ->
+                        onDynamicEffectsChange(!powerSave)
+                    }
+                )
+            }
+        )
+        DeviceSettingRow(
+            title = "隐藏地址",
+            detail = if (hostMasked) {
+                "地址已脱敏，历史地址与系统通知同样脱敏"
+            } else {
+                "地址明文显示，便于编辑与核对"
+            },
+            action = {
+                Switch(
+                    checked = hostMasked,
+                    onCheckedChange = onHostMaskedChange
+                )
+            }
+        )
+
+        HorizontalDivider(color = appColors.BorderSoft)
+        DeviceSectionTitle("PC 电源")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             PlainButton(
-                text = "扫码更新地址",
-                onClick = onScanQr,
-                modifier = Modifier.fillMaxWidth(),
+                text = "让 PC 睡眠",
+                onClick = onSleep,
+                enabled = uiState.connectionStatus == ConnectionStatus.Connected,
+                modifier = Modifier.weight(1f),
                 variant = PlainButtonVariant.SECONDARY
             )
-            DeviceSettingRow(
-                title = "历史地址",
-                detail = if (hostHistory.isEmpty()) {
-                    "连接成功后会自动记录"
-                } else {
-                    "最近使用的 ${hostHistory.size} 个地址"
-                },
-                action = {
-                    PlainButton(
-                        text = "查看",
-                        onClick = { showHostHistory = true },
-                        variant = PlainButtonVariant.SMALL
-                    )
-                }
+            PlainButton(
+                text = "关闭 PC",
+                onClick = onShutdown,
+                enabled = uiState.connectionStatus == ConnectionStatus.Connected,
+                modifier = Modifier.weight(1f),
+                variant = PlainButtonVariant.SECONDARY
             )
-
-            HorizontalDivider(color = appColors.BorderSoft)
-            DeviceSectionTitle("连接管理")
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "消息通道",
-                        color = appColors.TextPrimary,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Text(
-                        // 同一屏上地址栏已脱敏，状态行不能还是明文，否则「隐藏地址」形同虚设。
-                        // 这里只影响展示：下面的 enabled 判断仍用真实 serverHost，
-                        // 掩码串 `1**.1**.*.3*` 不会被当成有效地址参与逻辑。
-                        text = connectionDetail(
-                            status = uiState.connectionStatus,
-                            displayedHost = if (hostMasked) maskIp(uiState.serverHost) else uiState.serverHost
-                        ),
-                        color = connectionStatusColor(uiState.connectionStatus),
-                        fontSize = 11.sp,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                ConnectionAction(
-                    status = uiState.connectionStatus,
-                    enabled = uiState.serverHost.isNotBlank(),
-                    onConnect = onConnect,
-                    onDisconnect = onDisconnect
-                )
-            }
-
-            HorizontalDivider(color = appColors.BorderSoft)
-            DeviceSectionTitle("系统设置")
-            DeviceSettingRow(
-                title = "权限状态",
-                detail = "检查通知、悬浮窗和后台运行权限",
-                action = {
-                    PlainButton(
-                        text = "检查权限",
-                        onClick = onOpenPermissionCheck,
-                        variant = PlainButtonVariant.SMALL
-                    )
-                }
-            )
-            DeviceSettingRow(
-                title = "省电模式",
-                detail = if (dynamicEffectsEnabled) "当前使用完整动效" else "已减少动效，降低耗电",
-                action = {
-                    Switch(
-                        checked = !dynamicEffectsEnabled,
-                        onCheckedChange = { powerSave ->
-                            onDynamicEffectsChange(!powerSave)
-                        }
-                    )
-                }
-            )
-            DeviceSettingRow(
-                title = "隐藏地址",
-                detail = if (hostMasked) {
-                    "地址已脱敏，历史地址与系统通知同样脱敏"
-                } else {
-                    "地址明文显示，便于编辑与核对"
-                },
-                action = {
-                    Switch(
-                        checked = hostMasked,
-                        onCheckedChange = onHostMaskedChange
-                    )
-                }
-            )
-
-            HorizontalDivider(color = appColors.BorderSoft)
-            DeviceSectionTitle("PC 电源")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PlainButton(
-                    text = "让 PC 睡眠",
-                    onClick = onSleep,
-                    enabled = uiState.connectionStatus == ConnectionStatus.Connected,
-                    modifier = Modifier.weight(1f),
-                    variant = PlainButtonVariant.SECONDARY
-                )
-                PlainButton(
-                    text = "关闭 PC",
-                    onClick = onShutdown,
-                    enabled = uiState.connectionStatus == ConnectionStatus.Connected,
-                    modifier = Modifier.weight(1f),
-                    variant = PlainButtonVariant.SECONDARY
-                )
-            }
         }
     }
 

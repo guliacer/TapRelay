@@ -29,8 +29,8 @@ namespace TapRelay
             MaximizeBox = false;
             MinimizeBox = false;
             ShowInTaskbar = false;
-            ClientSize = new Size(620, 570);
-            Font = new Font("Microsoft YaHei UI", 9.5F);
+            ClientSize = new Size(660, 590);
+            Font = new Font(UiTokens.UiFontFamily, UiTokens.BodyFontSize);
 
             BuildLayout();
             ApplyTheme();
@@ -42,12 +42,12 @@ namespace TapRelay
             var root = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                Padding = new Padding(22),
+                Padding = new Padding(24),
                 ColumnCount = 2,
                 RowCount = 13,
                 BackColor = colors.Background
             };
-            root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150F));
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 164F));
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 32F));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
@@ -65,7 +65,7 @@ namespace TapRelay
             {
                 Text = "局域网 / 公网连接",
                 AutoSize = true,
-                Font = new Font("Microsoft YaHei UI", 13F, FontStyle.Bold),
+                Font = new Font(UiTokens.UiFontFamily, 15F, FontStyle.Bold),
                 ForeColor = colors.TextPrimary,
                 BackColor = colors.Background,
                 Margin = new Padding(0, 0, 0, 4)
@@ -98,7 +98,7 @@ namespace TapRelay
             var separatorLabel = new Label
             {
                 Text = "跨网络中继（Relay）",
-                Font = new Font("Microsoft YaHei UI", 11F, FontStyle.Bold),
+                Font = new Font(UiTokens.UiFontFamily, 11.5F, FontStyle.Bold),
                 ForeColor = colors.TextPrimary,
                 BackColor = colors.Background,
                 TextAlign = ContentAlignment.BottomLeft,
@@ -250,7 +250,7 @@ namespace TapRelay
             box.BorderStyle = BorderStyle.FixedSingle;
             box.BackColor = colors.Input;
             box.ForeColor = colors.TextPrimary;
-            box.Font = new Font("Microsoft YaHei UI", 9.5F);
+            box.Font = new Font(UiTokens.UiFontFamily, UiTokens.BodyFontSize);
         }
 
         private void AddRowWithButton(
@@ -403,27 +403,27 @@ namespace TapRelay
 
         private static Palette LightColors => new Palette
         {
-            Background = Color.FromArgb(238, 243, 241),
+            Background = Color.FromArgb(244, 247, 245),
             Surface = Color.White,
             Input = Color.White,
-            TextPrimary = Color.FromArgb(25, 48, 42),
-            TextSecondary = Color.FromArgb(101, 118, 111),
-            Border = Color.FromArgb(198, 214, 206),
-            Accent = Color.FromArgb(111, 134, 126),
-            AccentHover = Color.FromArgb(94, 118, 109),
+            TextPrimary = Color.FromArgb(24, 45, 38),
+            TextSecondary = Color.FromArgb(99, 118, 109),
+            Border = Color.FromArgb(208, 222, 215),
+            Accent = Color.FromArgb(63, 112, 95),
+            AccentHover = Color.FromArgb(48, 91, 76),
             Danger = Color.FromArgb(190, 76, 73),
-            SurfaceAlt = Color.FromArgb(240, 246, 243),
+            SurfaceAlt = Color.FromArgb(241, 247, 244),
             Warning = Color.FromArgb(155, 103, 35)
         };
 
         private static Palette DarkColors => new Palette
         {
-            Background = Color.FromArgb(14, 22, 20),
-            Surface = Color.FromArgb(23, 36, 32),
-            Input = Color.FromArgb(18, 29, 26),
-            TextPrimary = Color.FromArgb(236, 246, 241),
-            TextSecondary = Color.FromArgb(165, 187, 177),
-            Border = Color.FromArgb(53, 76, 67),
+            Background = Color.FromArgb(16, 25, 22),
+            Surface = Color.FromArgb(24, 38, 32),
+            Input = Color.FromArgb(20, 31, 26),
+            TextPrimary = Color.FromArgb(239, 248, 242),
+            TextSecondary = Color.FromArgb(165, 190, 177),
+            Border = Color.FromArgb(58, 82, 70),
             Accent = Color.FromArgb(142, 174, 161),
             AccentHover = Color.FromArgb(165, 192, 180),
             Danger = Color.FromArgb(235, 113, 105),

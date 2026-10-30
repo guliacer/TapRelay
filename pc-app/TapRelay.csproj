@@ -5,7 +5,7 @@
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>TapRelay</AssemblyName>
-    <Version>0.3.0</Version>
+    <Version>0.3.1</Version>
     <ApplicationIcon>TapRelay.ico</ApplicationIcon>
     <RootNamespace>TapRelay</RootNamespace>
     <Nullable>enable</Nullable>
@@ -42,6 +42,12 @@
     <EmbeddedResource Include="Assets\*.png" />
     <None Update="Assets\ComfyUIConsole\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <EmbeddedResource Include="Assets\ComfyUIConsole\**\*" />
+    <!-- 启动时自动重转本机 ComfyUI 工作流所需的转换器。发布包为单文件，
+         磁盘上没有 Assets 目录，因此必须作为嵌入资源随程序分发。 -->
+    <EmbeddedResource Include="..\tools\comfy_native_to_api.py"
+                      LogicalName="TapRelay.Assets.ComfyUIConsole.tools.comfy_native_to_api.py" />
+    <EmbeddedResource Include="..\tools\adapt_comfy_workflows.py"
+                      LogicalName="TapRelay.Assets.ComfyUIConsole.tools.adapt_comfy_workflows.py" />
   </ItemGroup>
 
 </Project>

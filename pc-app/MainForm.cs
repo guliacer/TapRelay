@@ -94,6 +94,7 @@ namespace TapRelay
                 "pc-server.log"));
         private RemoteRelayBridge? _relayBridge;
         private readonly UiState _uiState = UiStateStore.Load();
+        private bool _updateCheckStarted;
         private readonly AgentCompletionMonitor _agentMonitor;
         private readonly ProcessLifecycleMonitor _processLifecycleMonitor;
         private readonly ClaudeHahaPermissionBridge _hahaPermissionBridge;
@@ -105,7 +106,7 @@ namespace TapRelay
         // 脱敏只改变地址行的显示文本，不改变 _realAddressText，
         // 因此复制、二维码和手机连接仍使用完整地址。
         private readonly StripIconButton _maskAddressButton =
-            new StripIconButton(StripIconButton.Glyph.Mask, "脱敏显示连接地址", "脱敏");
+            new StripIconButton(StripIconButton.Glyph.Mask, "脱敏显示连接地址");
         private bool _addressMasked;
         private readonly CenteredTextBox _messageBox = new CenteredTextBox();
         private readonly Label _messageMarqueeLabel = new Label();
@@ -152,7 +153,9 @@ namespace TapRelay
         private readonly VisualCardPanel _serviceCard = new VisualCardPanel();
         private readonly VisualCardPanel _notificationCard = new VisualCardPanel();
         private readonly VisualCardPanel _logCard = new VisualCardPanel();
+        private readonly ToolStripMenuItem _compactModeMenuItem = new ToolStripMenuItem();
         private bool _isDarkMode;
+        private bool _compactMode;
         private bool _exitRequested;
         // 退出看门狗只允许启动一次：三条退出路径可能相互嵌套
         // （托盘退出 → Close() → OnFormClosing），重复启动只会多出无用的线程。
@@ -207,8 +210,8 @@ namespace TapRelay
             // 首帧先用折叠日志所需的紧凑高度，布局完成后再按 DPI 与字体实测值修正下限。
             // 展开日志时 ToggleLogExpanded 会临时把窗口顶高，收起后恢复到这里，
             // 避免默认状态在底部留下大块无内容区域。
-            MinimumSize = new Size(800, 760);
-            Size = new Size(880, 780);
+            MinimumSize = new Size(860, 760);
+            Size = new Size(960, 820);
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = UiFont(9.5F);
             // 卡片投影画在窗体背景上（见 OnPaintBackground），必须开双缓冲，
@@ -493,6 +496,59 @@ namespace TapRelay
             {
                 _logScrollBar.Visible = false;
             }
+            _ = CheckForUpdatesAsync();
+        }
+
+        private async Task CheckForUpdatesAsync()
+        {
+            if (_updateCheckStarted)
+            {
+                return;
+            }
+
+            _updateCheckStarted = true;
+            var release = await UpdateChecker.TryGetLatestAsync();
+            if (release == null || IsDisposed || Disposing ||
+                _uiState.NeverPromptUpdates ||
+                string.Equals(_uiState.SkippedUpdateVersion, release.Version, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            using var dialog = new UpdateDialog(release, UpdateChecker.CurrentVersion);
+            dialog.ShowDialog(this);
+            switch (dialog.Result)
+            {
+                case UpdateDialogResult.Update:
+                    OpenExternalUrl(release.TargetUrl);
+                    break;
+                case UpdateDialogResult.SkipOnce:
+                    _uiState.SkippedUpdateVersion = release.Version;
+                    SaveUiState();
+                    break;
+                case UpdateDialogResult.Never:
+                    _uiState.NeverPromptUpdates = true;
+                    SaveUiState();
+                    break;
+            }
+        }
+
+        private void OpenExternalUrl(string url)
+        {
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
+                (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            {
+                return;
+            }
+
+            try
+            {
+                Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
+            }
+            catch (Exception error)
+            {
+                MessageBox.Show(this, "无法打开更新链接：" + error.Message, "打开更新失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
@@ -572,7 +628,7 @@ namespace TapRelay
 
             _serviceCardLabel.Text = "服务与连接";
             _serviceCardLabel.AutoSize = true;
-            _serviceCardLabel.Font = UiFont(10.5F, FontStyle.Bold);
+            _serviceCardLabel.Font = UiFont(12F, FontStyle.Bold);
             _serviceCardLabel.ForeColor = LightTheme.TextPrimary;
 
             // 方案 B-3：原先挤在这张卡标题带里的「服务状态 / 手机连接数」已上移到状态条。
@@ -580,7 +636,7 @@ namespace TapRelay
             // 只是把首屏最高处的信息从第三行提到了第一行。
             _addressLabel.Text = "手机连接地址";
             _addressLabel.AutoSize = true;
-            _addressLabel.Font = UiFont(9.5F, FontStyle.Bold);
+            _addressLabel.Font = UiFont(11F, FontStyle.Bold);
             _addressLabel.ForeColor = LightTheme.TextPrimary;
 
             _addressHintLabel.Text = "扫码连接 · 公网地址在网络设置中配置";
@@ -626,6 +682,7 @@ namespace TapRelay
             _personalProjectsMenuItem.Click += (_, __) => ShowPersonalProjects();
             _networkSettingsMenuItem.Text = "网络设置";
             _networkSettingsMenuItem.Click += (_, __) => ShowNetworkSettings();
+            _compactModeMenuItem.Click += (_, __) => ToggleCompactMode();
             _autoStartMenuItem.Text = "开机自启动";
             _autoStartMenuItem.CheckOnClick = true;
             _autoStartMenuItem.Checked = AutoStartHelper.IsEnabled();
@@ -640,12 +697,13 @@ namespace TapRelay
                 _personalProjectsMenuItem,
                 new ToolStripSeparator(),
                 _networkSettingsMenuItem,
+                _compactModeMenuItem,
                 _autoStartMenuItem
             });
 
             _messageLabel.Text = "测试通知";
             _messageLabel.AutoSize = true;
-            _messageLabel.Font = UiFont(9.5F, FontStyle.Bold);
+            _messageLabel.Font = UiFont(10.5F, FontStyle.Bold);
             _messageLabel.ForeColor = LightTheme.TextPrimary;
 
             _messageBox.Font = UiFont(10F);
@@ -678,7 +736,7 @@ namespace TapRelay
 
             _notificationAppsLabel.Text = "通知应用";
             _notificationAppsLabel.AutoSize = true;
-            _notificationAppsLabel.Font = UiFont(10.5F, FontStyle.Bold);
+            _notificationAppsLabel.Font = UiFont(11F, FontStyle.Bold);
             _notificationAppsLabel.ForeColor = LightTheme.TextPrimary;
             _autoDetectAppsButton.Text = "自动检测";
             _autoDetectAppsButton.Click += async (_, __) => await RunNotificationAutoDetectAsync();
@@ -860,10 +918,16 @@ namespace TapRelay
                 UiStateStore.Save(_uiState);
             }
             _isDarkMode = _uiState.DarkMode.Value;
+            _compactMode = _uiState.CompactMode;
+            UpdateCompactModeMenuText();
             ApplyTheme();
             OnSnapshotChanged(_server.GetSnapshot());
             _layoutReady = true;
             RecalculateLayout();
+            if (_compactMode)
+            {
+                Height = Math.Max(MinWindowHeightFloor, _requiredMinHeight);
+            }
             _marqueeTimer.Start();
         }
 
@@ -1023,8 +1087,8 @@ namespace TapRelay
             y = Math.Max(_addressLabel.Bottom, _addressHintLabel.Bottom) + Gap;
 
             // 地址行只剩当前服务的主操作：二维码与更多菜单已上移到顶部状态条（方案 B-3）。
-            // 方案 B-4 再加一个 28px 复制图标，地址输入框仍保留最大可读宽度。
-            // 脱敏按钮带「脱敏」文字，排在复制图标左侧，地址框让出两者的总宽度。
+            // 方案 B-4 再加一组 28px 地址操作图标，地址输入框仍保留最大可读宽度。
+            // 脱敏与复制都使用纯图标，地址框只需让出两个方形按钮的总宽度。
             var primaryActionWidth = Math.Max(96,
                 TextRenderer.MeasureText("启动服务", PrimaryActionFont).Width + 28);
             _startButton.Size = new Size(primaryActionWidth, InputHeight);
@@ -1108,6 +1172,67 @@ namespace TapRelay
         {
             var notifyTop = _serviceCard.Bottom + SectionGap;
             var pageBottom = clientH - PageMargin;
+
+            var showApps = !_compactMode;
+            _notificationCard.Visible = showApps;
+            _notificationAppsPanel.Visible = showApps;
+            _notificationAppsLabel.Visible = showApps;
+            _autoDetectAppsButton.Visible = showApps;
+            _selectAppButton.Visible = showApps;
+
+            if (_compactMode)
+            {
+                // 简洁视图默认只显示一行最新日志，但点击摘要后仍允许展开查看完整记录。
+                // 不要在每次布局重算时重置 _logExpanded，否则点击展开会被本次重排立即撤销。
+                var compactLogCollapsedHeight = CardPad + _logLabel.Height + CardPad;
+                var compactLogExpandedReserved =
+                    CardPad + _logLabel.Height + Gap + LogExpandedMinHeight + CardPad;
+                var compactLogTop = notifyTop;
+                var compactLogHeight = _logExpanded
+                    ? Math.Max(compactLogExpandedReserved, pageBottom - compactLogTop)
+                    : compactLogCollapsedHeight;
+                _logCard.Visible = true;
+                _logCard.Location = new Point(cardLeft, compactLogTop);
+                _logCard.Size = new Size(cardWidth, compactLogHeight);
+                _logLabel.Location = new Point(innerLeft, compactLogTop + CardPad);
+                UpdateLogPreview();
+
+                _logBox.Visible = _logExpanded;
+                _logScrollBar.Visible = _logExpanded;
+                if (_logExpanded)
+                {
+                    var logBoxTop = _logLabel.Bottom + Gap;
+                    const int logScrollW = ScrollBarRenderer.PreferredWidth;
+                    var logBoxHeight = Math.Max(
+                        LogExpandedMinHeight,
+                        compactLogTop + compactLogHeight - CardPad - logBoxTop);
+                    _logScrollBar.Location = new Point(innerRight - logScrollW, logBoxTop);
+                    _logScrollBar.Size = new Size(logScrollW, logBoxHeight);
+                    _logBox.Location = new Point(innerLeft, logBoxTop);
+                    _logBox.Size = new Size(
+                        Math.Max(120, innerRight - logScrollW - Gap - innerLeft),
+                        logBoxHeight);
+                    _logEmptyLabel.Location = _logBox.Location;
+                    _logEmptyLabel.Size = _logBox.Size;
+                    _logEmptyLabel.Visible = _uiLogLines.Count == 0;
+                    _logScrollBar.Recalculate();
+                    _logCard.SetSectionLayout(logBoxTop - compactLogTop - Gap / 2);
+                    ApplyFieldShape(_logBox);
+                    _logCard.SetFieldLayout(ToCardRect(_logCard, _logBox));
+                }
+                else
+                {
+                    _logEmptyLabel.Visible = false;
+                    _logCard.SetSectionLayout(compactLogHeight);
+                    _logCard.SetFieldLayout();
+                }
+
+                _requiredMinHeight = compactLogTop
+                    + compactLogHeight
+                    + PageMargin
+                    + (Height - ClientSize.Height);
+                return;
+            }
 
             // 标题与两个标准次要按钮共用同一标题行，保证操作入口不再与分组标题抢行。
             var headerY = notifyTop + CardPad;
@@ -1304,7 +1429,7 @@ namespace TapRelay
         /// </summary>
         private static void DrawCardShadow(Graphics graphics, Control card, Color shadow)
         {
-            if (card == null || card.Width <= 8 || card.Height <= 8)
+            if (card == null || !card.Visible || card.Width <= 8 || card.Height <= 8)
             {
                 return;
             }
@@ -1546,7 +1671,7 @@ namespace TapRelay
             UpdateFieldMarquee(_addressBox, _addressMarqueeLabel, ref _addressMarqueeOffset);
             // 悬停提示也不能泄露完整地址：脱敏态只给状态说明。
             var addressToolTip = _addressMasked
-                ? "连接地址已脱敏显示，点击「脱敏」按钮可恢复完整地址。"
+                ? "连接地址已脱敏显示，点击眼睛按钮可恢复完整地址。"
                 : "完整手机连接地址：\r\n" + (_realAddressText ?? string.Empty);
             _toolTip.SetToolTip(_addressBox, addressToolTip);
             _toolTip.SetToolTip(_addressMarqueeLabel, addressToolTip);
@@ -2558,50 +2683,44 @@ namespace TapRelay
 
         private static ThemeColors LightTheme => new ThemeColors
         {
-            Background = Color.FromArgb(243, 245, 247),
+            Background = Color.FromArgb(244, 247, 245),
             Surface = Color.FromArgb(255, 255, 255),
-            SurfaceAlt = Color.FromArgb(245, 247, 249),
-            InputSurface = Color.FromArgb(248, 250, 252),
-            TextPrimary = Color.FromArgb(22, 33, 43),
-            TextSecondary = Color.FromArgb(99, 113, 129),
-            // #1F7A4D 对白 5.32:1；原 #278B5B 只有 4.26:1，低于 WCAG AA 小字门槛 4.5:1，
-            // 而「运行中」正是用户最需要一眼读清的状态。
-            Success = Color.FromArgb(33, 138, 100),
+            SurfaceAlt = Color.FromArgb(241, 247, 244),
+            InputSurface = Color.FromArgb(249, 252, 250),
+            TextPrimary = Color.FromArgb(24, 45, 38),
+            TextSecondary = Color.FromArgb(99, 118, 109),
+            // 深 sage 绿色，确保运行状态与主按钮在浅色表面上有足够对比度。
+            Success = Color.FromArgb(39, 139, 91),
             Danger = Color.FromArgb(196, 77, 77),
-            Accent = Color.FromArgb(82, 106, 122),
-            AccentHover = Color.FromArgb(62, 86, 102),
-            Border = Color.FromArgb(207, 216, 224),
-            AppsAccent = Color.FromArgb(34, 124, 131),
-            // #2C6BB0 对白 5.47:1。
-            Info = Color.FromArgb(47, 110, 165),
-            CardBorder = Color.FromArgb(220, 227, 233),
-            // #B2C5BE 对输入框底色 #F8FBFA 约 1.7:1：够勾出输入框轮廓，又比原来的
-            // 系统色 #646464（约 5.7:1）轻一个量级，不再压过它所在的卡片描边。
-            InputBorder = Color.FromArgb(184, 197, 207),
-            InputFocusBorder = Color.FromArgb(33, 138, 100),
-            Shadow = Color.FromArgb(19, 37, 52)
+            Accent = Color.FromArgb(63, 112, 95),
+            AccentHover = Color.FromArgb(48, 91, 76),
+            Border = Color.FromArgb(208, 222, 215),
+            AppsAccent = Color.FromArgb(55, 133, 116),
+            Info = Color.FromArgb(45, 105, 132),
+            CardBorder = Color.FromArgb(224, 234, 228),
+            InputBorder = Color.FromArgb(183, 204, 194),
+            InputFocusBorder = Color.FromArgb(39, 139, 91),
+            Shadow = Color.FromArgb(20, 55, 41)
         };
 
         private static ThemeColors DarkTheme => new ThemeColors
         {
-            Background = Color.FromArgb(17, 22, 28),
-            Surface = Color.FromArgb(26, 34, 42),
-            SurfaceAlt = Color.FromArgb(36, 46, 56),
-            InputSurface = Color.FromArgb(20, 27, 34),
-            TextPrimary = Color.FromArgb(244, 247, 250),
-            TextSecondary = Color.FromArgb(166, 179, 191),
-            Success = Color.FromArgb(88, 201, 154),
+            Background = Color.FromArgb(16, 25, 22),
+            Surface = Color.FromArgb(24, 38, 32),
+            SurfaceAlt = Color.FromArgb(34, 52, 44),
+            InputSurface = Color.FromArgb(20, 31, 26),
+            TextPrimary = Color.FromArgb(239, 248, 242),
+            TextSecondary = Color.FromArgb(165, 190, 177),
+            Success = Color.FromArgb(84, 196, 128),
             Danger = Color.FromArgb(240, 124, 118),
-            Accent = Color.FromArgb(141, 164, 181),
-            AccentHover = Color.FromArgb(169, 186, 200),
-            Border = Color.FromArgb(58, 72, 84),
-            AppsAccent = Color.FromArgb(106, 199, 197),
-            // #6FA8DC 对深色卡片面 6.34:1。
+            Accent = Color.FromArgb(142, 174, 161),
+            AccentHover = Color.FromArgb(165, 192, 180),
+            Border = Color.FromArgb(58, 82, 70),
+            AppsAccent = Color.FromArgb(106, 199, 174),
             Info = Color.FromArgb(126, 178, 230),
-            CardBorder = Color.FromArgb(44, 56, 67),
-            // 深色下必须比 CardBorder 更亮才看得见；原来的系统色在这里几乎不可见。
-            InputBorder = Color.FromArgb(70, 90, 104),
-            InputFocusBorder = Color.FromArgb(88, 201, 154),
+            CardBorder = Color.FromArgb(48, 69, 59),
+            InputBorder = Color.FromArgb(76, 107, 91),
+            InputFocusBorder = Color.FromArgb(84, 196, 128),
             Shadow = Color.FromArgb(0, 0, 0)
         };
 
@@ -2778,6 +2897,36 @@ namespace TapRelay
                 Invalidate(true);
                 Update();
             }
+        }
+
+        private void ToggleCompactMode()
+        {
+            _compactMode = !_compactMode;
+            if (_compactMode)
+            {
+                // 切入简洁视图时回到摘要态；之后用户仍可点击摘要展开完整日志。
+                _logExpanded = false;
+                _heightBeforeLogExpand = 0;
+                _heightAfterLogExpand = 0;
+            }
+            _uiState.CompactMode = _compactMode;
+            UpdateCompactModeMenuText();
+            SaveUiState();
+            RecalculateLayout();
+            if (_compactMode)
+            {
+                var compactHeight = Math.Max(MinWindowHeightFloor, _requiredMinHeight);
+                if (Height > compactHeight)
+                {
+                    Height = compactHeight;
+                }
+            }
+        }
+
+        private void UpdateCompactModeMenuText()
+        {
+            _compactModeMenuItem.Text = _compactMode ? "标准视图" : "简洁视图";
+            _compactModeMenuItem.Checked = _compactMode;
         }
 
         private static bool IsMuted(Label label)
@@ -3160,12 +3309,11 @@ namespace TapRelay
         /// </summary>
         private sealed class StatusStripPanel : VisualCardPanel
         {
-            // 字号只在本类出现，布局代码不重复。品牌 10.5pt 粗体（比原页头的 18pt 小得多，
-            // 但仍是条内最重的一档），大标题降为 9.5pt 常规，指标 9.5pt。
-            private readonly Font _brandFont = UiFont(UiTokens.SectionTitleFontSize, FontStyle.Bold);
-            private readonly Font _titleFont = UiFont(UiTokens.BodyFontSize);
+            // 字号只在本类出现，布局代码不重复。品牌与状态提高一级，形成清晰的工作台页头。
+            private readonly Font _brandFont = UiFont(12F, FontStyle.Bold);
+            private readonly Font _titleFont = UiFont(10F);
             private readonly Font _metricFont = UiFont(UiTokens.BodyFontSize);
-            private readonly Font _statusFont = UiFont(UiTokens.SectionTitleFontSize, FontStyle.Bold);
+            private readonly Font _statusFont = UiFont(11F, FontStyle.Bold);
 
             private Color _textSecondary = Color.FromArgb(101, 118, 111);
             private Color _success = Color.FromArgb(31, 122, 77);

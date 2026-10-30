@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -22,6 +23,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -84,7 +86,10 @@ fun PermissionCheckScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            CompactTopAppBar {
+                TopAppBar(
+                modifier = Modifier.fillMaxWidth().height(CompactTopAppBarHeight),
+                windowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
                 title = { Text(if (onboarding) "首次使用设置" else "权限检测") },
                 navigationIcon = {
                     TextButton(onClick = onBack) {
@@ -93,8 +98,14 @@ fun PermissionCheckScreen(
                             color = appColors.TextPrimary
                         )
                     }
-                }
-            )
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = appColors.TopBarSage,
+                    titleContentColor = appColors.TopBarSageContent,
+                    navigationIconContentColor = appColors.TopBarSageContent
+                )
+                )
+            }
         }
     ) { padding ->
         LazyColumn(

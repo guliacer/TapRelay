@@ -15,24 +15,37 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import com.lan.notify.data.ConnectionQrCodec
 import com.lan.notify.data.MessageRepository
 import com.lan.notify.data.NotifyMessage
 import com.lan.notify.data.RelayConfig
+import com.lan.notify.data.UpdateChecker
+import com.lan.notify.data.UpdatePromptStore
+import com.lan.notify.data.UpdateRelease
 import com.lan.notify.data.safeActionUri
 import com.lan.notify.notification.NotificationHelper
 import com.lan.notify.service.WebSocketService
 import com.lan.notify.ui.MainScreen
 import com.lan.notify.ui.ComfyUiScreen
+import com.lan.notify.ui.AppDestination
+import com.lan.notify.ui.DeviceScreen
 import com.lan.notify.ui.PermissionCheckScreen
+import com.lan.notify.ui.UpdateDialog
+import com.lan.notify.ui.WorkstationShell
 import com.lan.notify.ui.theme.NotifyTheme
 import com.lan.notify.util.AutoStartHelper
 
@@ -84,6 +97,15 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 主页面与顶部/底部系统栏使用同一层背景，避免真机上出现明显的白色空带。
+        // Compose 各页面的 TopAppBar / NavigationBar 会自行消费安全区 inset，
+        // 内容仍不会被状态栏和手势条遮挡。
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isNavigationBarContrastEnforced = false
+        }
         handleMessageIntent(intent)
         setContent {
             val themeMode by MessageRepository.themeMode.collectAsState()
@@ -93,69 +115,130 @@ class MainActivity : ComponentActivity() {
             val deviceName by MessageRepository.deviceName.collectAsState()
             val hostHistory by MessageRepository.hostHistory.collectAsState()
             val hostMasked by MessageRepository.hostMasked.collectAsState()
+            val updatePromptStore = remember { UpdatePromptStore(this@MainActivity) }
+            var updateRelease by remember { mutableStateOf<UpdateRelease?>(null) }
+            LaunchedEffect(Unit) {
+                val release = UpdateChecker.fetchLatest()
+                if (release != null && updatePromptStore.shouldPrompt(release.version)) {
+                    updateRelease = release
+                }
+            }
             // 首次启动自动进入权限向导（onboarding 模式），用户完成/跳过后才进主界面。
             var showPermissionCheck by remember { mutableStateOf(!MessageRepository.isOnboardingDone) }
-            var showComfyUi by remember { mutableStateOf(false) }
+            var activeDestination by rememberSaveable { mutableStateOf(AppDestination.TASK) }
             NotifyTheme(themeMode = themeMode) {
                 val uiState by MessageRepository.state.collectAsState()
                 BackHandler(enabled = showPermissionCheck) {
                     showPermissionCheck = false
                     MessageRepository.completeOnboarding()
                 }
-                if (showPermissionCheck) {
-                    PermissionCheckScreen(
-                        onboarding = !MessageRepository.isOnboardingDone,
-                        onBack = {
-                            showPermissionCheck = false
-                            MessageRepository.completeOnboarding()
-                        },
-                        onOpenAutoStartSettings = ::openAutoStartSettings
-                    )
-                } else if (showComfyUi) {
-                    BackHandler { showComfyUi = false }
-                    ComfyUiScreen(
-                        serverHost = uiState.serverHost,
-                        onBack = { showComfyUi = false }
-                    )
-                } else {
-                    MainScreen(
-                        uiState = uiState,
-                        themeMode = themeMode,
-                        onThemeModeChange = MessageRepository::setThemeMode,
-                        listMode = listMode,
-                        onListModeChange = MessageRepository::setListMode,
-                        projectExpandCounts = projectExpandCounts,
-                        onSetProjectExpandCount = MessageRepository::setProjectExpandCount,
-                        onServerHostChange = MessageRepository::updateServerHost,
-                        onScanQr = ::scanConnectionQr,
-                        onConnect = { startSocketService(WebSocketService.ACTION_CONNECT) },
-                        onDisconnect = { startSocketService(WebSocketService.ACTION_DISCONNECT) },
-                        onSleep = { sendPcPowerCommand(WebSocketService.PC_POWER_SLEEP) },
-                        onShutdown = ::confirmPcShutdown,
-                        onOpenPermissionCheck = { showPermissionCheck = true },
-                        onMarkMessageRead = ::markMessageRead,
-                        onMarkAllMessagesRead = ::markAllMessagesRead,
-                        onResolveApproval = ::resolveApprovalFromMessage,
-                        onProcessWaiting = ::processWaitingMessage,
-                        dynamicEffectsEnabled = dynamicEffectsEnabled,
-                        onDynamicEffectsChange = MessageRepository::setDynamicEffectsEnabled,
-                        deviceName = deviceName,
-                        onDeviceNameChange = MessageRepository::setDeviceName,
-                        hostHistory = hostHistory,
-                        hostMasked = hostMasked,
-                        onHostMaskedChange = MessageRepository::setHostMasked,
-                        onClearHostHistory = MessageRepository::clearHostHistory,
-                        onClearHistory = {
-                            NotificationHelper.clearTaskNotifications(
-                                this,
-                                MessageRepository.state.value.messages
+                BackHandler(enabled = !showPermissionCheck && activeDestination != AppDestination.TASK) {
+                    activeDestination = AppDestination.TASK
+                }
+                Box(Modifier.fillMaxSize()) {
+                    WorkstationShell(
+                        active = activeDestination,
+                        onSelect = { activeDestination = it },
+                        task = {
+                            MainScreen(
+                                uiState = uiState,
+                                themeMode = themeMode,
+                                onThemeModeChange = MessageRepository::setThemeMode,
+                                listMode = listMode,
+                                onListModeChange = MessageRepository::setListMode,
+                                projectExpandCounts = projectExpandCounts,
+                                onSetProjectExpandCount = MessageRepository::setProjectExpandCount,
+                                onServerHostChange = MessageRepository::updateServerHost,
+                                onScanQr = ::scanConnectionQr,
+                                onConnect = { startSocketService(WebSocketService.ACTION_CONNECT) },
+                                onDisconnect = { startSocketService(WebSocketService.ACTION_DISCONNECT) },
+                                onSleep = { sendPcPowerCommand(WebSocketService.PC_POWER_SLEEP) },
+                                onShutdown = ::confirmPcShutdown,
+                                onOpenPermissionCheck = { showPermissionCheck = true },
+                                onMarkMessageRead = ::markMessageRead,
+                                onMarkAllMessagesRead = ::markAllMessagesRead,
+                                onResolveApproval = ::resolveApprovalFromMessage,
+                                onProcessWaiting = ::processWaitingMessage,
+                                dynamicEffectsEnabled = dynamicEffectsEnabled,
+                                onDynamicEffectsChange = MessageRepository::setDynamicEffectsEnabled,
+                                deviceName = deviceName,
+                                onDeviceNameChange = MessageRepository::setDeviceName,
+                                hostHistory = hostHistory,
+                                hostMasked = hostMasked,
+                                onHostMaskedChange = MessageRepository::setHostMasked,
+                                onClearHostHistory = MessageRepository::clearHostHistory,
+                                onOpenDeviceManagement = {
+                                    activeDestination = AppDestination.DEVICE
+                                },
+                                onClearHistory = {
+                                    NotificationHelper.clearTaskNotifications(
+                                        this@MainActivity,
+                                        MessageRepository.state.value.messages
+                                    )
+                                    MessageRepository.clearMessages()
+                                },
+                                onOpenComfyUi = {
+                                    activeDestination = AppDestination.COMFY_UI
+                                },
                             )
-                            MessageRepository.clearMessages()
                         },
-                        onOpenComfyUi = {
-                            showComfyUi = true
+                        comfyUi = {
+                            ComfyUiScreen(
+                                serverHost = uiState.serverHost,
+                                onBack = { activeDestination = AppDestination.TASK },
+                                embedded = true
+                            )
                         },
+                        device = {
+                            DeviceScreen(
+                                uiState = uiState,
+                                deviceName = deviceName,
+                                onDeviceNameChange = MessageRepository::setDeviceName,
+                                onServerHostChange = MessageRepository::updateServerHost,
+                                dynamicEffectsEnabled = dynamicEffectsEnabled,
+                                onDynamicEffectsChange = MessageRepository::setDynamicEffectsEnabled,
+                                onScanQr = ::scanConnectionQr,
+                                onConnect = { startSocketService(WebSocketService.ACTION_CONNECT) },
+                                onDisconnect = { startSocketService(WebSocketService.ACTION_DISCONNECT) },
+                                onSleep = { sendPcPowerCommand(WebSocketService.PC_POWER_SLEEP) },
+                                onShutdown = ::confirmPcShutdown,
+                                onOpenPermissionCheck = { showPermissionCheck = true },
+                                hostHistory = hostHistory,
+                                hostMasked = hostMasked,
+                                onHostMaskedChange = MessageRepository::setHostMasked,
+                                onClearHostHistory = MessageRepository::clearHostHistory
+                            )
+                        }
                     )
+                    if (showPermissionCheck) {
+                        PermissionCheckScreen(
+                            onboarding = !MessageRepository.isOnboardingDone,
+                            onBack = {
+                                showPermissionCheck = false
+                                MessageRepository.completeOnboarding()
+                            },
+                            onOpenAutoStartSettings = ::openAutoStartSettings
+                        )
+                    }
+                    updateRelease?.let { release ->
+                        UpdateDialog(
+                            release = release,
+                            currentVersion = UpdateChecker.currentVersion,
+                            onOpenUpdate = {
+                                updateRelease = null
+                                openExternalUrl(release.targetUrl)
+                            },
+                            onSkipOnce = {
+                                updatePromptStore.skipVersion(release.version)
+                                updateRelease = null
+                            },
+                            onNeverPrompt = {
+                                updatePromptStore.neverPrompt()
+                                updateRelease = null
+                            },
+                            onDismiss = { updateRelease = null }
+                        )
+                    }
                 }
             }
         }
@@ -201,6 +284,16 @@ class MainActivity : ComponentActivity() {
         }
         intent?.removeExtra(EXTRA_MESSAGE_ID)
         intent?.removeExtra(EXTRA_MESSAGE_ACTION_URL)
+    }
+
+    private fun openExternalUrl(rawUrl: String) {
+        val uri = runCatching { Uri.parse(rawUrl) }.getOrNull() ?: return
+        if (uri.scheme != "http" && uri.scheme != "https") return
+        runCatching {
+            startActivity(Intent(Intent.ACTION_VIEW, uri))
+        }.onFailure {
+            Toast.makeText(this, "无法打开更新链接", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun markMessageRead(messageId: String) {

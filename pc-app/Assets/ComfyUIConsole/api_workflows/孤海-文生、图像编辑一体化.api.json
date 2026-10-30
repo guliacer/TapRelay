@@ -1,0 +1,339 @@
+{
+  "8": {
+    "inputs": {
+      "unet_name": "qwen\\Qwen21-redqw21UNLOCKEDV2TI2I_redqw21UNLOCKEDV2_int8.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "9": {
+    "inputs": {
+      "clip_name": "qwen\\qwen3vl_8b_int8_convrot.safetensors",
+      "type": "qwen_image",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "10": {
+    "inputs": {
+      "vae_name": "qwen\\qwen_image_2.1_vae_bf16.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "12": {
+    "inputs": {
+      "seed": 459272053661742,
+      "steps": 30,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "75",
+        0
+      ],
+      "positive": [
+        "118",
+        0
+      ],
+      "negative": [
+        "118",
+        1
+      ],
+      "latent_image": [
+        "118",
+        2
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "16": {
+    "inputs": {
+      "samples": [
+        "12",
+        0
+      ],
+      "vae": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "39": {
+    "inputs": {
+      "比例": "2:3",
+      "模式": "总像素",
+      "固定边像素": 1536,
+      "百万像素": 2,
+      "长边最小": 1024,
+      "长边最大": 1536,
+      "自定宽度": 32,
+      "自定高度": 1024,
+      "倍数取整": 32
+    },
+    "class_type": "GoohaiRatioAndResolution",
+    "_meta": {
+      "title": "比例与分辨率"
+    }
+  },
+  "75": {
+    "inputs": {
+      "history": 4,
+      "degree": 2,
+      "ridge": 0.01,
+      "guard_threshold": 0.25,
+      "start_percent": 0.15,
+      "end_percent": 0.85,
+      "max_consecutive_hits": 1,
+      "cache_device": "cpu",
+      "max_cache_mb": 1024,
+      "threshold_mode": "constant",
+      "split_ratio": 0.5,
+      "late_threshold": 0.08,
+      "model": [
+        "165",
+        0
+      ]
+    },
+    "class_type": "QwenImage21SpectrumT8",
+    "_meta": {
+      "title": "Qwen Image 2.1 Spectrum (T8)"
+    }
+  },
+  "79": {
+    "inputs": {
+      "backend_mode": "sage_kitchen",
+      "model": [
+        "196",
+        0
+      ]
+    },
+    "class_type": "QwenImage21SageAttentionT8",
+    "_meta": {
+      "title": "Qwen Image 2.1 Sage Attention (T8)"
+    }
+  },
+  "118": {
+    "inputs": {
+      "prompt": [
+        "195",
+        0
+      ],
+      "negative_prompt": "",
+      "latent_width": [
+        "39",
+        1
+      ],
+      "latent_height": [
+        "39",
+        2
+      ],
+      "mode": "填充",
+      "ref_image_size": "自动",
+      "clip": [
+        "9",
+        0
+      ],
+      "vae": [
+        "10",
+        0
+      ],
+      "mask": [
+        "174",
+        0
+      ],
+      "image_01": [
+        "170",
+        0
+      ]
+    },
+    "class_type": "TextEncodeQwenImage21GH",
+    "_meta": {
+      "title": "Qwen Image 2.1 文本编码 GH"
+    }
+  },
+  "124": {
+    "inputs": {
+      "image": [
+        "16",
+        0
+      ],
+      "info": [
+        "118",
+        3
+      ]
+    },
+    "class_type": "RestoreQwenImage21GH",
+    "_meta": {
+      "title": "Restore Qwen Image 2.1 GH"
+    }
+  },
+  "165": {
+    "inputs": {
+      "residual_diff_threshold": 0.08,
+      "start_percent": 0.1,
+      "end_percent": 0.85,
+      "max_consecutive_hits": 2,
+      "cache_device": "cpu",
+      "metric_stride": 8,
+      "max_cache_mb": 1024,
+      "threshold_mode": "constant",
+      "split_ratio": 0.5,
+      "late_threshold": 0.03,
+      "model": [
+        "79",
+        0
+      ]
+    },
+    "class_type": "QwenImage21BlockCacheT8",
+    "_meta": {
+      "title": "Qwen Image 2.1 Block Cache (T8)"
+    }
+  },
+  "170": {
+    "inputs": {
+      "是否阻断": [
+        "179",
+        2
+      ],
+      "阻断模式": "仅输出空值"
+    },
+    "class_type": "GoohaiRouteBlocker",
+    "_meta": {
+      "title": "路由阻断"
+    }
+  },
+  "174": {
+    "inputs": {
+      "是否阻断": true,
+      "阻断模式": "仅输出空值"
+    },
+    "class_type": "GoohaiRouteBlocker",
+    "_meta": {
+      "title": "是否禁用遮罩"
+    }
+  },
+  "179": {
+    "inputs": {
+      "用户提示词": [
+        "199",
+        0
+      ],
+      "文生图模型": "Qwen-Image-2.1-PE-T2I.Q5_K_S.gguf",
+      "图生图模型": "Qwen-Image-2.1-PE-I2I.Q5_K_S.gguf",
+      "视觉模型": "Qwen-Image-2.1-PE-I2I.mmproj-bf16.gguf",
+      "输出语言": "自动",
+      "透明背景": false,
+      "种子值": 1968652460,
+      "种子模式": "随机",
+      "卸载模型": "自动"
+    },
+    "class_type": "QwenImagePromptOptimizer",
+    "_meta": {
+      "title": "Qwen image 2.1 提示词优化"
+    }
+  },
+  "194": {
+    "inputs": {
+      "lora_name": "qwen\\编辑\\Qwen2.1 一致性无偏移_GH_V1.0.safetensors",
+      "strength_model": 0.48,
+      "model": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Load LoRA"
+    }
+  },
+  "195": {
+    "inputs": {
+      "gh_input_type": "STRING",
+      "Any": [
+        "179",
+        0
+      ]
+    },
+    "class_type": "GoohaiDisplayAny",
+    "_meta": {
+      "title": "展示任意 GH"
+    }
+  },
+  "196": {
+    "inputs": {
+      "boolean": [
+        "197",
+        1
+      ],
+      "on_true": [
+        "194",
+        0
+      ],
+      "on_false": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "easy ifElse",
+    "_meta": {
+      "title": "easy ifElse"
+    }
+  },
+  "197": {
+    "inputs": {
+      "gh_input_type": "ANY",
+      "Any": [
+        "170",
+        0
+      ]
+    },
+    "class_type": "GoohaiAnyExists",
+    "_meta": {
+      "title": "万能是否存在(GH)"
+    }
+  },
+  "199": {
+    "inputs": {
+      "文本": "一个女生在跳舞，古风服饰"
+    },
+    "class_type": "GGTextDisplayCopy",
+    "_meta": {
+      "title": "GG 文本"
+    }
+  },
+  "202": {
+    "inputs": {
+      "文件名前缀": "%date:yyyy_MM_dd%/图像",
+      "格式": "JPEG",
+      "压缩模式": "civilblur",
+      "质量": 85,
+      "目标大小KB": 0,
+      "清除内存": true,
+      "图像": [
+        "124",
+        0
+      ]
+    },
+    "class_type": "GGImageCompressSave",
+    "_meta": {
+      "title": "GG 图像压缩保存"
+    }
+  }
+}

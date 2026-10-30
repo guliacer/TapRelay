@@ -85,3 +85,7 @@ Android ComfyUI 工作流操作 -> http://<PC-LAN-IP>:1122/comfy/* -> PC 本机�
 ```
 **用户明确的 ComfyUI 手机控制例外**：允许 Android 在现有 `1122` 页面内访问 `/comfy`，选择已配置的 API 工作流、填写参数、上传图片、提交运行并查看结果。`/comfy` 只代理到 PC 本机回环地址上的随 TapRelay 生命周期管理的控制台进程；不得新增手机可见端口、云服务或公网消息链路。控制台管理页 `/comfy/admin` 及 `/comfy/api/admin/*` 只允许 PC 本机回环请求。
 **违规特征**：引入 Firebase Cloud Messaging、登录注册、云数据库、多租户控制台或公网反向代理作为默认路径；为了 ComfyUI 另开 LAN 端口；把管理接口暴露给手机。
+
+### R5: ComfyUI 工作流目录固定
+**断言**：项目内适配 ComfyUI 的工作流文件必须集中存放在专用目录 `W:\TapRelay\pc-app\Assets\ComfyUIConsole\api_workflows\`，不得直接放在项目根目录、`pc-app` 根目录或 `ComfyUIConsole` 目录下。每个工作流的 `.api.json`、`.ui.json` 及同名配套文件必须放在该目录内；运行时自动转换产物只能写入 `%LOCALAPPDATA%\TapRelay\ComfyUIConsole\api_workflows`。
+**违规特征**：在 `W:\TapRelay` 根目录新增工作流 JSON；把工作流文件散落到 `pc-app\Assets\ComfyUIConsole`、`tools` 或其它业务目录；把运行时转换产物写回源码根目录。

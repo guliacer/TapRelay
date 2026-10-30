@@ -36,6 +36,10 @@ namespace TapRelay
         private const int MaxSuyanImageBytes = 64 * 1024 * 1024;
         private const string SuyanImportUrl = "http://127.0.0.1:9477/guli/suyan/import";
         private const string WorkflowTitleOverlayName = "workflow_titles.json";
+        private const string AutoConvertConfigName = "auto-convert.json";
+        private const string ConverterEntryName = "adapt_comfy_workflows.py";
+        private const string ConverterModuleName = "comfy_native_to_api.py";
+        private static readonly TimeSpan AutoConvertTimeout = TimeSpan.FromSeconds(120);
 
         private readonly SemaphoreSlim _startGate = new SemaphoreSlim(1, 1);
         private readonly string _dataRoot = Path.Combine(
@@ -53,6 +57,8 @@ namespace TapRelay
         private readonly Dictionary<string, string[]> _promptMutedNodes =
             new Dictionary<string, string[]>(StringComparer.Ordinal);
         private readonly Queue<string> _promptMuteOrder = new Queue<string>();
+        private readonly object _converterGate = new object();
+        private Process? _converterProcess;
 
         public async Task StartAsync(Action<string> log)
         {
@@ -64,7 +70,7 @@ namespace TapRelay
                     return;
 
                 if (_process != null) await StopProcessAsync().ConfigureAwait(false);
-                var exe = PreparePayload();
+                var exe = await PreparePayloadAsync().ConfigureAwait(false);
                 _port = FindAvailableLoopbackPort();
                 WritePrivateConfig(_port);
                 _client = new HttpClient(new HttpClientHandler { UseProxy = false })
@@ -2089,7 +2095,7 @@ namespace TapRelay
             }
         }
 
-        private string PreparePayload()
+        private async Task<string> PreparePayloadAsync()
         {
             Directory.CreateDirectory(_dataRoot);
             var exe = Path.Combine(_dataRoot, "ComfyUI手机控制台.exe");
@@ -2111,6 +2117,10 @@ namespace TapRelay
                     CopyBundledAsset(relativePath, destination);
             }
 
+            // 在随包资源刷新之后、标题/GG 同步之前重转本机工作流，保证后两者
+            // 作用于最终产物。转换失败只记日志，不阻断通知和手机控制台启动。
+            await TryAutoConvertWorkflowsAsync(workflows).ConfigureAwait(false);
+
             // 随包资源刷新会覆盖 .ui.json，用户改过的名称在这里重新写回。
             ApplyWorkflowTitleOverrides();
 
@@ -2119,6 +2129,404 @@ namespace TapRelay
             // .ui.json 的字段白名单，并为缺失的后端控制器补一个 no-op 节点。
             ApplyGgOptionWorkflowSync(workflows);
             return exe;
+        }
+
+        private sealed class AutoConvertSettings
+        {
+            public bool Enabled { get; set; } = true;
+            public string? Source { get; set; }
+            public string? Python { get; set; }
+            public string? BaseUrl { get; set; }
+        }
+
+        private AutoConvertSettings LoadAutoConvertSettings()
+        {
+            var path = Path.Combine(_dataRoot, AutoConvertConfigName);
+            if (!File.Exists(path)) return new AutoConvertSettings();
+            try
+            {
+                var settings = JsonSerializer.Deserialize<AutoConvertSettings>(
+                    File.ReadAllText(path),
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                return settings ?? new AutoConvertSettings();
+            }
+            catch (Exception error)
+            {
+                _log("ComfyUI 工作流自动重转：配置读取失败，" + error.Message);
+                return new AutoConvertSettings { Enabled = false };
+            }
+        }
+
+        private async Task TryAutoConvertWorkflowsAsync(string workflowsDirectory)
+        {
+            var settings = LoadAutoConvertSettings();
+            if (!settings.Enabled) return;
+
+            var baseUrl = ResolveConverterBaseUrl(settings.BaseUrl);
+            var reachable = await IsEndpointReachableAsync(
+                baseUrl, "/system_stats", TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+            if (!reachable)
+            {
+                _log("ComfyUI 工作流自动重转：ComfyUI 未运行（" + baseUrl + "），跳过");
+                return;
+            }
+
+            // 优先使用显式配置或常见安装位置；否则让正在运行的 ComfyUI 报告
+            // 自己的目录，避免把某台机器的绝对路径硬编码进程序。
+            var source = ResolveWorkflowSource(settings.Source);
+            if (source == null)
+                source = await ResolveSourceFromComfyUiAsync(baseUrl).ConfigureAwait(false);
+
+            var python = ResolveConverterPython(settings.Python, source);
+            if (python == null)
+            {
+                _log("ComfyUI 工作流自动重转：未找到 Python，跳过（可在 auto-convert.json 配置 python）");
+                return;
+            }
+            if (source == null) source = DeriveSourceFromPython(python);
+            if (source == null)
+            {
+                _log("ComfyUI 工作流自动重转：未找到 ComfyUI 用户工作流目录，跳过（可在 auto-convert.json 配置 source）");
+                return;
+            }
+
+            string entry;
+            try
+            {
+                entry = EnsureConverterScripts();
+            }
+            catch (Exception error)
+            {
+                _log("ComfyUI 工作流自动重转：内置转换脚本不可用，" + error.Message);
+                return;
+            }
+
+            try
+            {
+                _log("ComfyUI 工作流自动重转：" + source);
+                var exitCode = await RunConverterAsync(
+                    python, entry, source, baseUrl, workflowsDirectory).ConfigureAwait(false);
+                if (exitCode != 0)
+                    _log("ComfyUI 工作流自动重转：转换脚本退出码 " + exitCode + "，已保留可用的旧工作流");
+            }
+            catch (Exception error)
+            {
+                _log("ComfyUI 工作流自动重转失败：" + error.Message);
+            }
+        }
+
+        private static string? ResolveWorkflowSource(string? configured)
+        {
+            var candidates = new List<string>();
+            if (!string.IsNullOrWhiteSpace(configured)) candidates.Add(configured.Trim());
+            var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (!string.IsNullOrWhiteSpace(profile))
+            {
+                candidates.Add(Path.Combine(profile, "ComfyUI", "user", "default", "workflows"));
+                candidates.Add(Path.Combine(profile, "Documents", "ComfyUI", "user", "default", "workflows"));
+            }
+            candidates.Add(@"C:\ComfyUI\user\default\workflows");
+            foreach (var candidate in candidates)
+            {
+                try
+                {
+                    if (Directory.Exists(candidate)) return Path.GetFullPath(candidate);
+                }
+                catch
+                {
+                    // Ignore malformed configured paths and keep probing defaults.
+                }
+            }
+            return null;
+        }
+
+        private static async Task<string?> ResolveSourceFromComfyUiAsync(string baseUrl)
+        {
+            try
+            {
+                using var handler = new HttpClientHandler { UseProxy = false };
+                using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(3) };
+                var json = await client.GetStringAsync(baseUrl + "/internal/folder_paths")
+                    .ConfigureAwait(false);
+                using var document = JsonDocument.Parse(json);
+                if (document.RootElement.ValueKind != JsonValueKind.Object) return null;
+
+                // custom_nodes / models 等目录都在 ComfyUI 根目录下，向上找即可
+                // 得到 user\default\workflows，不依赖安装目录的具体名称。
+                foreach (var propertyName in new[] { "custom_nodes", "checkpoints", "loras" })
+                {
+                    if (!document.RootElement.TryGetProperty(propertyName, out var value) ||
+                        value.ValueKind != JsonValueKind.Array)
+                        continue;
+                    foreach (var entry in value.EnumerateArray())
+                    {
+                        if (entry.ValueKind != JsonValueKind.String) continue;
+                        var reported = entry.GetString();
+                        if (string.IsNullOrWhiteSpace(reported)) continue;
+                        var source = TryDeriveWorkflowSource(reported);
+                        if (source != null) return source;
+                    }
+                }
+            }
+            catch
+            {
+                // Older ComfyUI builds may not expose internal routes.
+            }
+            return null;
+        }
+
+        private static string? TryDeriveWorkflowSource(string reportedPath)
+        {
+            try
+            {
+                var directory = new DirectoryInfo(reportedPath);
+                if (!directory.Exists) directory = directory.Parent;
+                for (var depth = 0; depth < 5 && directory != null;
+                     depth++, directory = directory.Parent)
+                {
+                    var candidate = Path.Combine(directory.FullName, "user", "default", "workflows");
+                    if (Directory.Exists(candidate)) return candidate;
+                }
+            }
+            catch
+            {
+                // Ignore paths reported by a remote or removed ComfyUI install.
+            }
+            return null;
+        }
+
+        private static string? DeriveSourceFromPython(string python)
+        {
+            try
+            {
+                var directory = Path.GetDirectoryName(python);
+                if (string.IsNullOrWhiteSpace(directory)) return null;
+                // ComfyUI 便携版布局：<root>\python_embeded\python.exe 与
+                // <root>\ComfyUI\user\default\workflows 并列。
+                if (!string.Equals(Path.GetFileName(directory), "python_embeded",
+                        StringComparison.OrdinalIgnoreCase))
+                    return null;
+                var root = Path.GetDirectoryName(directory);
+                if (string.IsNullOrWhiteSpace(root)) return null;
+                var candidate = Path.Combine(root, "ComfyUI", "user", "default", "workflows");
+                return Directory.Exists(candidate) ? candidate : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string? ResolveConverterPython(string? configured, string? source)
+        {
+            if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured))
+                return configured;
+
+            var fromEnvironment = Environment.GetEnvironmentVariable("TAPRELAY_PYTHON");
+            if (!string.IsNullOrWhiteSpace(fromEnvironment) && File.Exists(fromEnvironment))
+                return fromEnvironment;
+
+            if (!string.IsNullOrWhiteSpace(source))
+            {
+                try
+                {
+                    var directory = new DirectoryInfo(source);
+                    while (directory != null)
+                    {
+                        var embedded = Path.Combine(directory.FullName, "python_embeded", "python.exe");
+                        if (File.Exists(embedded)) return embedded;
+                        directory = directory.Parent;
+                    }
+                }
+                catch
+                {
+                    // Fall through to PATH probing.
+                }
+            }
+
+            foreach (var name in new[] { "python.exe", "python3.exe", "py.exe" })
+            {
+                var onPath = FindOnPath(name);
+                if (onPath != null) return onPath;
+            }
+            return null;
+        }
+
+        private static string? FindOnPath(string fileName)
+        {
+            var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+            foreach (var raw in path.Split(Path.PathSeparator))
+            {
+                if (string.IsNullOrWhiteSpace(raw)) continue;
+                try
+                {
+                    var candidate = Path.Combine(raw.Trim().Trim('"'), fileName);
+                    if (File.Exists(candidate)) return candidate;
+                }
+                catch
+                {
+                    // Skip invalid PATH entries.
+                }
+            }
+            return null;
+        }
+
+        private string ResolveConverterBaseUrl(string? configured)
+        {
+            var candidate = (configured ?? string.Empty).Trim();
+            if (candidate.Length == 0) candidate = ReadComfyUrl();
+            candidate = candidate.TrimEnd('/');
+            return Uri.TryCreate(candidate, UriKind.Absolute, out var uri) &&
+                   (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
+                ? candidate
+                : "http://127.0.0.1:8188";
+        }
+
+        private static async Task<bool> IsEndpointReachableAsync(
+            string baseUrl, string path, TimeSpan timeout)
+        {
+            try
+            {
+                using var handler = new HttpClientHandler { UseProxy = false };
+                using var client = new HttpClient(handler) { Timeout = timeout };
+                using var response = await client
+                    .GetAsync(baseUrl + path, HttpCompletionOption.ResponseHeadersRead)
+                    .ConfigureAwait(false);
+                return response.IsSuccessStatusCode;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private string EnsureConverterScripts()
+        {
+            var toolsDirectory = Path.Combine(_dataRoot, "tools");
+            Directory.CreateDirectory(toolsDirectory);
+            foreach (var name in new[] { ConverterEntryName, ConverterModuleName })
+            {
+                var relativePath = "tools\\" + name;
+                var destination = Path.Combine(toolsDirectory, name);
+                if (!File.Exists(destination) || !BundledAssetEquals(relativePath, destination))
+                    CopyBundledAsset(relativePath, destination);
+            }
+            return Path.Combine(toolsDirectory, ConverterEntryName);
+        }
+
+        private async Task<int> RunConverterAsync(
+            string python, string entry, string source, string baseUrl, string workflowsDirectory)
+        {
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = python,
+                WorkingDirectory = Path.GetDirectoryName(entry) ?? _dataRoot,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8
+            };
+            startInfo.Environment["PYTHONIOENCODING"] = "utf-8";
+            startInfo.Environment["PYTHONUTF8"] = "1";
+            startInfo.Environment["PYTHONUNBUFFERED"] = "1";
+            // 不在数据目录留下 __pycache__。
+            startInfo.Environment["PYTHONDONTWRITEBYTECODE"] = "1";
+            if (string.Equals(Path.GetFileName(python), "py.exe", StringComparison.OrdinalIgnoreCase))
+                startInfo.ArgumentList.Add("-3");
+            startInfo.ArgumentList.Add(entry);
+            startInfo.ArgumentList.Add("--apply");
+            startInfo.ArgumentList.Add("--out");
+            startInfo.ArgumentList.Add(workflowsDirectory);
+            startInfo.ArgumentList.Add("--base-url");
+            startInfo.ArgumentList.Add(baseUrl);
+            startInfo.ArgumentList.Add("--source");
+            startInfo.ArgumentList.Add(source);
+
+            using var process = new Process { StartInfo = startInfo };
+            if (!process.Start())
+                throw new InvalidOperationException("无法启动工作流转换脚本");
+            TrackConverterProcess(process);
+            try
+            {
+                var stdoutTask = process.StandardOutput.ReadToEndAsync();
+                var stderrTask = process.StandardError.ReadToEndAsync();
+                var exited = await Task.Run(
+                    () => process.WaitForExit((int)AutoConvertTimeout.TotalMilliseconds))
+                    .ConfigureAwait(false);
+                if (!exited)
+                {
+                    try { process.Kill(true); } catch { }
+                    _log("ComfyUI 工作流自动重转：超过 " + (int)AutoConvertTimeout.TotalSeconds
+                         + " 秒未完成，已终止");
+                    return -1;
+                }
+                var stdout = await stdoutTask.ConfigureAwait(false);
+                var stderr = await stderrTask.ConfigureAwait(false);
+                LogConverterSummary(stdout, stderr);
+                return process.ExitCode;
+            }
+            finally
+            {
+                UntrackConverterProcess(process);
+            }
+        }
+
+        private void LogConverterSummary(string stdout, string stderr)
+        {
+            var summary = new List<string>();
+            foreach (var raw in (stdout ?? string.Empty).Split('\n'))
+            {
+                var line = raw.Trim();
+                if (line.StartsWith("候选工作流", StringComparison.Ordinal) ||
+                    line.StartsWith("写入 ", StringComparison.Ordinal) ||
+                    line.StartsWith("可直接运行", StringComparison.Ordinal) ||
+                    line.StartsWith("诊断合计", StringComparison.Ordinal) ||
+                    line.StartsWith("未解析输入归因", StringComparison.Ordinal) ||
+                    line.StartsWith("插件/节点未加载", StringComparison.Ordinal) ||
+                    line.StartsWith("源工作流未连线", StringComparison.Ordinal) ||
+                    line.StartsWith("旁路节点", StringComparison.Ordinal) ||
+                    line.StartsWith("链接表断链", StringComparison.Ordinal))
+                    summary.Add(line);
+            }
+            if (!string.IsNullOrWhiteSpace(stderr))
+                summary.Add("错误：" + TruncateForMessage(stderr));
+            _log(summary.Count == 0
+                ? "ComfyUI 工作流自动重转：转换脚本未输出统计"
+                : "ComfyUI 工作流自动重转：" + string.Join("；", summary));
+        }
+
+        private void TrackConverterProcess(Process process)
+        {
+            lock (_converterGate) _converterProcess = process;
+        }
+
+        private void UntrackConverterProcess(Process process)
+        {
+            lock (_converterGate)
+            {
+                if (ReferenceEquals(_converterProcess, process)) _converterProcess = null;
+            }
+        }
+
+        private void KillConverterProcess()
+        {
+            Process? converter;
+            lock (_converterGate)
+            {
+                converter = _converterProcess;
+                _converterProcess = null;
+            }
+            if (converter == null) return;
+            try
+            {
+                if (!converter.HasExited) converter.Kill(true);
+            }
+            catch
+            {
+                // The converter may have exited between the check and the kill.
+            }
         }
 
         private static IEnumerable<string> EnumerateBundledWorkflowAssets()
@@ -2615,6 +3023,9 @@ namespace TapRelay
 
         private async Task StopProcessAsync()
         {
+            // 自动重转是外部 Python 进程，停止服务或退出程序时必须一并清理。
+            KillConverterProcess();
+
             var process = _process;
             _process = null;
             _client?.Dispose();

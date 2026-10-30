@@ -1,0 +1,25 @@
+{
+  "title": "孤海-文生、图像编辑一体化",
+  "order": 42,
+  "hideAdvanced": false,
+  "fields": [
+    "199.文本",
+    "12.steps",
+    "39.比例",
+    "39.百万像素",
+    "8.unet_name",
+    "194.lora_name",
+    "194.strength_model"
+  ],
+  "labels": {
+    "199.文本": "GG 文本 · 文本",
+    "12.steps": "KSampler · steps",
+    "39.比例": "比例与分辨率 · 比例",
+    "39.百万像素": "比例与分辨率 · 百万像素",
+    "8.unet_name": "Load Diffusion Model · unet_name",
+    "194.lora_name": "Load LoRA · lora_name",
+    "194.strength_model": "Load LoRA · strength_model"
+  },
+  "defaults": {},
+  "category": "Qwen 图像编辑"
+}

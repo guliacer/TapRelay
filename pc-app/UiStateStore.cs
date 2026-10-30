@@ -8,11 +8,17 @@ namespace TapRelay
     /// 持久化的 PC 端轻量 UI 状态：
     /// - TestMessage：测试通知输入框文本（重启后仍保留，不回退默认值）
     /// - DarkMode：深/浅色主题（null 表示未设置过，回退旧 settings.json）
+    /// - CompactMode：主窗口简洁视图（缺失时默认为标准视图）
+    /// - SkippedUpdateVersion：用户暂时跳过的版本号
+    /// - NeverPromptUpdates：用户永久关闭版本更新提醒
     /// </summary>
     internal sealed class UiState
     {
         public string TestMessage { get; set; } = string.Empty;
         public bool? DarkMode { get; set; }
+        public bool CompactMode { get; set; }
+        public string SkippedUpdateVersion { get; set; } = string.Empty;
+        public bool NeverPromptUpdates { get; set; }
     }
 
     internal static class UiStateStore

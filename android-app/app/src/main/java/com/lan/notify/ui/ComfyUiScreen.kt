@@ -169,7 +169,8 @@ private const val MAX_IMAGE_UPLOAD_BYTES = 64 * 1024 * 1024
 @Composable
 fun ComfyUiScreen(
     serverHost: String,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    embedded: Boolean = false
 ) {
     val context = LocalContext.current
     val repository = remember(serverHost) {
@@ -214,7 +215,14 @@ fun ComfyUiScreen(
     var loraFilesLoaded by remember { mutableStateOf(false) }
     val maskBases = remember { mutableStateMapOf<String, String>() }
     var maskEditor by remember { mutableStateOf<MaskTarget?>(null) }
+    // 运行失败/无结果时的瞬时红字提示，2 秒后自动消失。
+    var runErrorToast by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
+
+    /** 显示一条运行相关的错误提示，2 秒后自动清空。 */
+    fun showRunError(message: String) {
+        runErrorToast = message
+    }
     var workflowOrder by remember { mutableStateOf(ComfyWorkflowOrderStore.load(context)) }
     val orderedWorkflows = remember(workflows, workflowOrder) {
         ComfyWorkflowOrderStore.apply(workflows, workflowOrder)
@@ -589,6 +597,13 @@ fun ComfyUiScreen(
         }
     }
 
+    // 运行错误提示 2 秒后自动消失。
+    LaunchedEffect(runErrorToast) {
+        if (runErrorToast.isBlank()) return@LaunchedEffect
+        delay(2000L)
+        runErrorToast = ""
+    }
+
     LaunchedEffect(promptId) {
         val id = promptId ?: return@LaunchedEffect
         val workflowId = runWorkflowId
@@ -620,6 +635,7 @@ fun ComfyUiScreen(
                     outputs = mergedOutputs
                     runFailed = job.failed
                     runText = if (job.failed) "执行出错" else "生成完成"
+                    if (job.failed) showRunError("执行出错：工作流运行失败，请检查电脑端 ComfyUI")
                     showResults = !job.failed && receivedOutputs.isNotEmpty()
                     if (!job.failed) {
                         if (workflowId != null) {
@@ -649,6 +665,7 @@ fun ComfyUiScreen(
                             }
                         } else {
                             runText = "生成完成 · 没有图片结果"
+                            showRunError("生成完成，但没有返回图片，请确认工作流包含保存节点")
                         }
                     }
                     promptId = null
@@ -657,14 +674,20 @@ fun ComfyUiScreen(
                 runText = "生成中…"
             } catch (e: Exception) {
                 runText = e.message ?: "等待任务结果失败"
+                showRunError(e.message ?: "等待任务结果失败")
             }
             delay(2000)
         }
     }
 
     Scaffold(
+        // 工作台外层已经占位底栏与手势区，页面内不能再次消费系统 inset。
+        contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
         topBar = {
-            TopAppBar(
+            CompactTopAppBar {
+                TopAppBar(
+                modifier = Modifier.fillMaxWidth().height(CompactTopAppBarHeight),
+                windowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
@@ -690,15 +713,17 @@ fun ComfyUiScreen(
                     }
                 },
                 navigationIcon = {
-                    TextButton(
-                        onClick = ::navigateBack,
-                        colors = ButtonDefaults.textButtonColors(
-                            contentColor = appColors.TopBarSageContent
-                        )
-                    ) {
-                        Text(
-                            if (showGallery || selected != null || showResults) "返回" else "关闭"
-                        )
+                    if (showGallery || selected != null || showResults || !embedded) {
+                        TextButton(
+                            onClick = ::navigateBack,
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = appColors.TopBarSageContent
+                            )
+                        ) {
+                            Text(
+                                if (showGallery || selected != null || showResults) "返回" else "关闭"
+                            )
+                        }
                     }
                 },
                 actions = {
@@ -725,7 +750,8 @@ fun ComfyUiScreen(
                     navigationIconContentColor = appColors.TopBarSageContent,
                     actionIconContentColor = appColors.TopBarSageContent
                 )
-            )
+                )
+            }
         }
     ) { padding ->
         if (showGallery) {
@@ -908,6 +934,7 @@ fun ComfyUiScreen(
                     }
                     if (missingImage != null) {
                         runText = "请先选择图片：${missingImage.label}"
+                        showRunError("请先选择图片：${missingImage.label}")
                     } else {
                         scope.launch {
                             try {
@@ -927,11 +954,36 @@ fun ComfyUiScreen(
                                 promptId = repository.runWorkflow(selected!!.id, typed)
                             } catch (e: Exception) {
                                 runText = e.message ?: "提交失败"
+                                showRunError(e.message ?: "提交失败")
                             }
                         }
                     }
                 }
             )
+        }
+    }
+
+    // 运行失败/无结果时的瞬时红字提示，2 秒后自动消失（LaunchedEffect 计时）。
+    if (runErrorToast.isNotBlank()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .zIndex(10f)
+                .padding(bottom = 24.dp),
+            contentAlignment = Alignment.BottomCenter
+        ) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = appColors.Danger.copy(alpha = 0.92f),
+                shadowElevation = 6.dp
+            ) {
+                Text(
+                    text = runErrorToast,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White
+                )
+            }
         }
     }
 

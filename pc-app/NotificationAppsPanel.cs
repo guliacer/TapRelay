@@ -101,30 +101,30 @@ namespace TapRelay
         private Color _accentColor = Color.FromArgb(111, 134, 126);
 
         // 图标芯片布局常量。应用目录是首页的次级信息，保持清晰但不再占用过多纵向空间：
-        // 38px 图标 + 3px 间距 + 两行 8.5pt 文字，72px 足够承载长名称。
-        // 若压到 64px，名称区只剩 21px，长名（如 DeepSeek Harness）会被截成一行省略号。
+        // 34px 图标 + 4px 间距 + 两行 8.5pt 文字，66px 足够承载长名称，
+        // 同时让应用目录从视觉上退到连接主模块之后的次级信息层。
         // 列数由 BalancedColumns 决定，不是固定值：MaxPerRow = 8 只是上限，
         // 实际列数 = ceil(n / ceil(n / 8))，再受可用宽度（Width - 2*AppsRowLeft）限制。
         // 因此 12 个应用排成 2 行 × 6，13 个排成 2 行 × 7/6，都在 MaxVisibleRows = 2 之内。
         // 宽度上界是 8 列 × 96 = 768px，默认窗口宽度下不会触顶；也就是说
         // ChipWidth 只要不超过 96，就不会因为列数被宽度压小而多出一行。
-        private const int ChipWidth = 94;
-        private const int ChipHeight = 72;
-        private const int IconNameGap = 3;
+        private const int ChipWidth = 96;
+        private const int ChipHeight = 66;
+        private const int IconNameGap = 4;
         private const int ChipGapX = 0;
-        private const int ChipGapY = 6;
+        private const int ChipGapY = 8;
         private const float AppNameFontSize = UiTokens.AppNameFontSize;
-        private const int AppsRowLeft = 12;
-        private const int ContentTopInset = 4;
+        private const int AppsRowLeft = 8;
+        private const int ContentTopInset = 6;
         private const int MinPerRow = 4;
         private const int MaxPerRow = 8;
         // 每个分区最多同时显示的行数；超出部分通过分区内垂直滚动查看。
         private const int MaxVisibleRows = 2;
         // 分区标题行使用固定高度，让文字可在标题带中垂直居中，并与上方分隔线留出安全距离。
-        private const int GroupHeaderHeight = 30;
+        private const int GroupHeaderHeight = 32;
         private const int GroupGap = UiTokens.RowGap;
-        private const int HintTopGap = 10;
-        private const int ContentBottomInset = 10;
+        private const int HintTopGap = 8;
+        private const int ContentBottomInset = 8;
         // 高度预算不足时，单个分区仍至少完整显示一行图标与应用名称。
         // 只显示图标会让“已适配应用（未安装）”无法区分具体应用；超过可视高度
         // 的内容继续通过分区内滚动查看。
@@ -2386,7 +2386,7 @@ namespace TapRelay
             private Color _border;
             private Color _accent = Color.FromArgb(111, 134, 126);
             // 图标保持足够辨识度，同时给应用名与分区留出更紧凑的节奏。
-            private readonly Size _iconSize = new Size(38, 38);
+            private readonly Size _iconSize = new Size(34, 34);
             private bool _hover;
             private readonly Image? _icon;
 
@@ -2466,11 +2466,11 @@ namespace TapRelay
                 path.CloseFigure();
 
                 var disabledSurface = _surface.R + _surface.G + _surface.B > 380
-                    ? Color.FromArgb(241, 243, 245)
-                    : Color.FromArgb(34, 42, 50);
+                    ? Color.FromArgb(241, 246, 243)
+                    : Color.FromArgb(31, 46, 39);
                 var disabledBorder = _surface.R + _surface.G + _surface.B > 380
-                    ? Color.FromArgb(202, 211, 219)
-                    : Color.FromArgb(58, 70, 81);
+                    ? Color.FromArgb(202, 218, 208)
+                    : Color.FromArgb(58, 79, 67);
                 // hover 时改用强调色描边并加粗，给出明确的「可点」反馈；
                 // 未 hover 时回到常规描边，避免所有芯片一起抢注意力。
                 var showHover = _hover && Enabled;

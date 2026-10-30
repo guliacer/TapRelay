@@ -106,12 +106,14 @@ fun MainScreen(
     hostMasked: Boolean = false,
     onHostMaskedChange: (Boolean) -> Unit = {},
     onClearHostHistory: () -> Unit = {},
+    onOpenDeviceManagement: () -> Unit = {},
     onOpenComfyUi: () -> Unit = {}
 ) {
     var showPersonalProjectsDialog by rememberSaveable { mutableStateOf(false) }
-    var showDeviceControlSheet by rememberSaveable { mutableStateOf(false) }
 
     Scaffold(
+        // 工作台外层已经占位底栏与手势区，页面内不能再次消费系统 inset。
+        contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
         topBar = {
             // 浅色主题顶栏用淡鼠尾草绿底 + 深鼠尾草绿字/图标（与品牌 PrimarySage 同系，
             // 色值取自 appColors.TopBarSage，与主按钮填充同源统一）：
@@ -120,7 +122,10 @@ fun MainScreen(
                 (themeMode != ThemeMode.SYSTEM || !isSystemInDarkTheme())
             val topBarContainer = if (isLightTopBar) appColors.TopBarSage else MaterialTheme.colorScheme.surface
             val topBarContent = if (isLightTopBar) appColors.TopBarSageContent else MaterialTheme.colorScheme.onSurface
-            TopAppBar(
+            CompactTopAppBar(containerColor = topBarContainer) {
+                TopAppBar(
+                modifier = Modifier.fillMaxWidth().height(CompactTopAppBarHeight),
+                windowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
                 title = { Text("\u4efb\u52a1\u901a\u77e5") },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = topBarContainer,
@@ -128,40 +133,35 @@ fun MainScreen(
                     actionIconContentColor = topBarContent
                 ),
                 actions = {
-                    ComfyUiIconButton(
-                        onClick = onOpenComfyUi,
-                        tint = topBarContent,
-                        modifier = Modifier.padding(end = 8.dp)
-                    )
-                    PersonalProjectsIconButton(
-                        onClick = { showPersonalProjectsDialog = true },
-                        tint = topBarContent,
-                        modifier = Modifier.padding(end = 8.dp)
-                    )
-                    ThemeIconButton(
+                    MoreActionsMenu(
                         themeMode = themeMode,
-                        onClick = {
+                        onToggleTheme = {
                             onThemeModeChange(
                                 if (themeMode == ThemeMode.LIGHT) ThemeMode.DARK else ThemeMode.LIGHT
                             )
                         },
+                        onOpenProjects = { showPersonalProjectsDialog = true },
+                        onOpenPermissions = onOpenPermissionCheck,
                         tint = topBarContent,
                         modifier = Modifier.padding(end = 12.dp)
                     )
                 }
-            )
+                )
+            }
         }
     ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(16.dp)
+                // 底部由工作台 Scaffold 的底栏占位负责，页面本身不能再留一整段底部空白。
+                .padding(horizontal = 16.dp)
+                .padding(top = 16.dp)
         ) {
             CompactConnectionStatus(
                 uiState = uiState,
                 deviceName = deviceName,
-                onOpenDeviceManagement = { showDeviceControlSheet = true },
+                onOpenDeviceManagement = onOpenDeviceManagement,
                 onConnect = onConnect,
                 onScanQr = onScanQr
             )
@@ -233,11 +233,58 @@ fun MainScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             if (uiState.messages.isEmpty()) {
-                Text(
-                    text = "\u6682\u65e0\u6d88\u606f",
-                    color = appColors.TextSecondary,
-                    modifier = Modifier.weight(1f)
-                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = appColors.Surface
+                        ),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(20.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "暂无任务消息",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = appColors.TextPrimary
+                            )
+                            Text(
+                                text = if (uiState.connectionStatus == ConnectionStatus.Connected) {
+                                    "PC 已连接，新的任务完成后会自动出现在这里"
+                                } else {
+                                    "先连接 PC，任务完成后通知会自动出现在这里"
+                                },
+                                color = appColors.TextSecondary,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            if (uiState.connectionStatus != ConnectionStatus.Connected) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    PlainButton(
+                                        text = "重新连接",
+                                        onClick = onConnect,
+                                        enabled = uiState.serverHost.isNotBlank(),
+                                        variant = PlainButtonVariant.PRIMARY
+                                    )
+                                    PlainButton(
+                                        text = "扫码连接",
+                                        onClick = onScanQr,
+                                        variant = PlainButtonVariant.SECONDARY
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             } else {
                 val listState = rememberLazyListState()
                 val scope = rememberCoroutineScope()
@@ -363,28 +410,6 @@ fun MainScreen(
 
     if (showPersonalProjectsDialog) {
         PersonalProjectsDialog(onDismiss = { showPersonalProjectsDialog = false })
-    }
-
-    if (showDeviceControlSheet) {
-        DeviceControlSheet(
-            uiState = uiState,
-            deviceName = deviceName,
-            onDeviceNameChange = onDeviceNameChange,
-            onServerHostChange = onServerHostChange,
-            dynamicEffectsEnabled = dynamicEffectsEnabled,
-            onDynamicEffectsChange = onDynamicEffectsChange,
-            onScanQr = onScanQr,
-            onConnect = onConnect,
-            onDisconnect = onDisconnect,
-            onSleep = onSleep,
-            onShutdown = onShutdown,
-            onOpenPermissionCheck = onOpenPermissionCheck,
-            hostHistory = hostHistory,
-            hostMasked = hostMasked,
-            onHostMaskedChange = onHostMaskedChange,
-            onClearHostHistory = onClearHostHistory,
-            onDismiss = { showDeviceControlSheet = false }
-        )
     }
 
 }

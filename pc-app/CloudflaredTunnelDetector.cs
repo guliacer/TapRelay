@@ -35,7 +35,7 @@ namespace TapRelay
             return hosts;
         }
 
-        private static IEnumerable<string> CandidateConfigPaths()
+        internal static IEnumerable<string> CandidateConfigPaths()
         {
             // 用户手动运行时：%USERPROFILE%\.cloudflared\config.yml
             var user = Path.Combine(

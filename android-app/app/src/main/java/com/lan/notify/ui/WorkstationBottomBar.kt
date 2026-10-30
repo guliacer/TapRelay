@@ -1,13 +1,21 @@
 package com.lan.notify.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -19,6 +27,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.lan.notify.ui.theme.appColors
 
+/** 底栏内容高度；手势区由 navigationBars inset 另行保留。 */
+val CompactBottomBarHeight = 56.dp
+
 /**
  * 类似微信的持久底栏。它只负责展示当前选中项并向上层发出切换事件，
  * 页面状态由工作台壳层持有。
@@ -29,33 +40,45 @@ fun WorkstationBottomBar(
     onSelect: (AppDestination) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    NavigationBar(
-        modifier = modifier,
-        containerColor = appColors.Surface,
-        tonalElevation = 0.dp
+    val density = LocalDensity.current
+    val navigationBarHeight = with(density) {
+        WindowInsets.navigationBars.getBottom(this).toDp()
+    }
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(appColors.Surface)
     ) {
-        AppDestination.entries.forEach { destination ->
-            val isSelected = selected == destination
-            NavigationBarItem(
-                selected = isSelected,
-                onClick = { onSelect(destination) },
-                icon = {
-                    DestinationIcon(
-                        destination = destination,
-                        selected = isSelected
+        NavigationBar(
+            modifier = Modifier.fillMaxWidth().height(CompactBottomBarHeight),
+            windowInsets = WindowInsets(0, 0, 0, 0),
+            containerColor = appColors.Surface,
+            tonalElevation = 0.dp
+        ) {
+            AppDestination.entries.forEach { destination ->
+                val isSelected = selected == destination
+                NavigationBarItem(
+                    selected = isSelected,
+                    onClick = { onSelect(destination) },
+                    icon = {
+                        DestinationIcon(
+                            destination = destination,
+                            selected = isSelected
+                        )
+                    },
+                    label = { Text(destination.label) },
+                    alwaysShowLabel = true,
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = appColors.OnPrimary,
+                        selectedTextColor = appColors.PrimarySageStrong,
+                        indicatorColor = appColors.PrimarySage,
+                        unselectedIconColor = appColors.TextSecondary,
+                        unselectedTextColor = appColors.TextSecondary
                     )
-                },
-                label = { Text(destination.label) },
-                alwaysShowLabel = true,
-                colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = appColors.OnPrimary,
-                    selectedTextColor = appColors.PrimarySageStrong,
-                    indicatorColor = appColors.PrimarySage,
-                    unselectedIconColor = appColors.TextSecondary,
-                    unselectedTextColor = appColors.TextSecondary
                 )
-            )
+            }
         }
+        Spacer(Modifier.fillMaxWidth().height(navigationBarHeight))
     }
 }
 

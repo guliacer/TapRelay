@@ -1,6 +1,7 @@
 package com.lan.notify.ui
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
@@ -23,20 +24,25 @@ fun WorkstationShell(
     comfyUi: @Composable () -> Unit,
     device: @Composable () -> Unit
 ) {
-    Scaffold(
-        bottomBar = {
-            WorkstationBottomBar(selected = active, onSelect = onSelect)
-        },
-        containerColor = appColors.Background
-    ) { padding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-        ) {
-            PersistentSlot(AppDestination.TASK, active, task)
-            PersistentSlot(AppDestination.COMFY_UI, active, comfyUi)
-            PersistentSlot(AppDestination.DEVICE, active, device)
+    Box(Modifier.fillMaxSize()) {
+        Scaffold(
+            // 页面顶栏由 CompactTopAppBar 统一绘制状态栏 inset，
+            // 外层壳层不能再次消费顶部安全区，否则会产生重复空白。
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
+            bottomBar = {
+                WorkstationBottomBar(selected = active, onSelect = onSelect)
+            },
+            containerColor = appColors.Background
+        ) { padding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+            ) {
+                PersistentSlot(AppDestination.TASK, active, task)
+                PersistentSlot(AppDestination.COMFY_UI, active, comfyUi)
+                PersistentSlot(AppDestination.DEVICE, active, device)
+            }
         }
     }
 }

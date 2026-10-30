@@ -681,8 +681,13 @@ fun ComfyUiScreen(
     }
 
     Scaffold(
+        // 工作台外层已经占位底栏与手势区，页面内不能再次消费系统 inset。
+        contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
         topBar = {
-            TopAppBar(
+            CompactTopAppBar {
+                TopAppBar(
+                modifier = Modifier.fillMaxWidth().height(CompactTopAppBarHeight),
+                windowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
@@ -745,7 +750,8 @@ fun ComfyUiScreen(
                     navigationIconContentColor = appColors.TopBarSageContent,
                     actionIconContentColor = appColors.TopBarSageContent
                 )
-            )
+                )
+            }
         }
     ) { padding ->
         if (showGallery) {

@@ -8,11 +8,13 @@ namespace TapRelay
     /// 持久化的 PC 端轻量 UI 状态：
     /// - TestMessage：测试通知输入框文本（重启后仍保留，不回退默认值）
     /// - DarkMode：深/浅色主题（null 表示未设置过，回退旧 settings.json）
+    /// - CompactMode：主窗口简洁视图（缺失时默认为标准视图）
     /// </summary>
     internal sealed class UiState
     {
         public string TestMessage { get; set; } = string.Empty;
         public bool? DarkMode { get; set; }
+        public bool CompactMode { get; set; }
     }
 
     internal static class UiStateStore

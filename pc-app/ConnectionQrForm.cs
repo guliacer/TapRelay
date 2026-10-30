@@ -20,6 +20,7 @@ namespace TapRelay
         private Bitmap? _qrImage;
         private string _payload = string.Empty;
         private Button _checkButton = null!;
+        private Button _repairButton = null!;
         private Label _checkResultLabel = null!;
 
         public ConnectionQrForm(List<string> endpoints, bool darkMode, string relayUrl = "", string relayRoomId = "")
@@ -47,7 +48,7 @@ namespace TapRelay
             MinimizeBox = false;
             ShowInTaskbar = false;
             ClientSize = new Size(430, 560);
-            Font = new Font("Microsoft YaHei UI", 9.5F);
+            Font = new Font(UiTokens.UiFontFamily, UiTokens.BodyFontSize);
             BuildLayout();
         }
 
@@ -69,7 +70,7 @@ namespace TapRelay
             {
                 Text = "手机扫码快速连接",
                 AutoSize = true,
-                Font = new Font("Microsoft YaHei UI", 14F, FontStyle.Bold),
+                Font = new Font(UiTokens.UiFontFamily, 15F, FontStyle.Bold),
                 ForeColor = colors.TextPrimary,
                 BackColor = colors.Background,
                 Location = new Point(24, 20)
@@ -165,14 +166,19 @@ namespace TapRelay
             };
             Controls.Add(_checkResultLabel);
 
-            // 同一排三个按钮居中：检查公网 / 复制 / 关闭。
+            // 同一排四个按钮居中：检查公网 / 修复隧道 / 复制 / 关闭。
             _checkButton = UiButtonStyler.Create("检查公网", UiButtonStyle.Secondary, ToButtonColors(colors));
-            _checkButton.Size = new Size(110, UiButtonStyler.DialogButtonHeight);
+            _checkButton.Size = new Size(92, UiButtonStyler.DialogButtonHeight);
             _checkButton.Click += OnCheckPublicTunnel;
             Controls.Add(_checkButton);
 
-            var copyButton = UiButtonStyler.Create("复制", UiButtonStyle.Secondary, ToButtonColors(colors));
-            copyButton.Size = new Size(110, UiButtonStyler.DialogButtonHeight);
+            _repairButton = UiButtonStyler.Create("修复隧道", UiButtonStyle.Secondary, ToButtonColors(colors));
+            _repairButton.Size = new Size(92, UiButtonStyler.DialogButtonHeight);
+            _repairButton.Click += OnRepairPublicTunnel;
+            Controls.Add(_repairButton);
+
+            var copyButton = UiButtonStyler.Create("复制", UiButtonStyle.Primary, ToButtonColors(colors));
+            copyButton.Size = new Size(92, UiButtonStyler.DialogButtonHeight);
             copyButton.Click += (_, __) =>
             {
                 Clipboard.SetText(_payload);
@@ -180,16 +186,17 @@ namespace TapRelay
             };
             Controls.Add(copyButton);
 
-            var closeButton = UiButtonStyler.Create("关闭", UiButtonStyle.Primary, ToButtonColors(colors));
-            closeButton.Size = new Size(100, UiButtonStyler.DialogButtonHeight);
+            var closeButton = UiButtonStyler.Create("关闭", UiButtonStyle.Secondary, ToButtonColors(colors));
+            closeButton.Size = new Size(92, UiButtonStyler.DialogButtonHeight);
             closeButton.DialogResult = DialogResult.Cancel;
             Controls.Add(closeButton);
             CancelButton = closeButton;
 
-            var buttonX = (430 - (110 + 8 + 110 + 8 + 100)) / 2; // 同排居中
+            var buttonX = (430 - (92 * 4 + 8 * 3)) / 2; // 同排居中
             _checkButton.Location = new Point(buttonX, buttonY);
-            copyButton.Location = new Point(buttonX + 118, buttonY);
-            closeButton.Location = new Point(buttonX + 236, buttonY);
+            _repairButton.Location = new Point(buttonX + 100, buttonY);
+            copyButton.Location = new Point(buttonX + 200, buttonY);
+            closeButton.Location = new Point(buttonX + 300, buttonY);
 
             // Show relay room ID if relay is enabled
             if (!string.IsNullOrWhiteSpace(_relayRoomId))
@@ -223,6 +230,7 @@ namespace TapRelay
         {
             var colors = _darkMode ? DarkColors : LightColors;
             _checkButton.Enabled = false;
+            _repairButton.Enabled = false;
             _checkResultLabel.ForeColor = colors.TextSecondary;
             _checkResultLabel.Text = "正在检查公网隧道…";
 
@@ -245,13 +253,49 @@ namespace TapRelay
             finally
             {
                 _checkButton.Enabled = true;
+                _repairButton.Enabled = true;
+            }
+        }
+
+        /// <summary>按用户请求修复 Cloudflare Tunnel 配置并重启已有隧道。</summary>
+        private async void OnRepairPublicTunnel(object? sender, EventArgs e)
+        {
+            var colors = _darkMode ? DarkColors : LightColors;
+            _checkButton.Enabled = false;
+            _repairButton.Enabled = false;
+            _checkResultLabel.ForeColor = colors.TextSecondary;
+            _checkResultLabel.Text = "正在修复公网隧道…";
+
+            try
+            {
+                var result = await Task.Run(() => CloudflaredTunnelRepair.Repair(1122));
+                _checkResultLabel.ForeColor = result.Level switch
+                {
+                    2 => colors.Success,
+                    1 => colors.WarningText,
+                    _ => colors.Danger
+                };
+                _checkResultLabel.Text = result.Message;
+            }
+            catch (Exception ex)
+            {
+                _checkResultLabel.ForeColor = colors.Danger;
+                _checkResultLabel.Text = "修复异常：" + ex.Message;
+            }
+            finally
+            {
+                _checkButton.Enabled = true;
+                _repairButton.Enabled = true;
             }
         }
 
         /// <summary>探测公网候选；返回 (0=失败, 1=警告, 2=正常) 与用户可读消息。</summary>
         private (int Level, string Message) ProbePublicTunnel()
         {
-            var publicEndpoints = _endpoints.Where(IsPublicCandidate).ToList();
+            var candidates = _endpoints
+                .Concat(TunnelDetectorRegistry.DetectAll(1122))
+                .Distinct(StringComparer.OrdinalIgnoreCase);
+            var publicEndpoints = candidates.Where(IsPublicCandidate).ToList();
             if (publicEndpoints.Count == 0)
             {
                 return (1, "无公网候选，跨网络需配置隧道工具");
@@ -434,27 +478,27 @@ namespace TapRelay
 
         private static Palette LightColors => new Palette
         {
-            Background = Color.FromArgb(238, 243, 241),
+            Background = Color.FromArgb(244, 247, 245),
             Surface = Color.White,
-            TextPrimary = Color.FromArgb(25, 48, 42),
-            TextSecondary = Color.FromArgb(101, 118, 111),
-            Border = Color.FromArgb(198, 214, 206),
-            Accent = Color.FromArgb(111, 134, 126),
-            AccentHover = Color.FromArgb(94, 118, 109),
+            TextPrimary = Color.FromArgb(24, 45, 38),
+            TextSecondary = Color.FromArgb(99, 118, 109),
+            Border = Color.FromArgb(208, 222, 215),
+            Accent = Color.FromArgb(63, 112, 95),
+            AccentHover = Color.FromArgb(48, 91, 76),
             Danger = Color.FromArgb(190, 76, 73),
             Success = Color.FromArgb(39, 139, 91),
-            SurfaceAlt = Color.FromArgb(240, 246, 243),
+            SurfaceAlt = Color.FromArgb(241, 247, 244),
             WarningText = Color.FromArgb(120, 66, 18),
             WarningBackground = Color.FromArgb(255, 243, 205)
         };
 
         private static Palette DarkColors => new Palette
         {
-            Background = Color.FromArgb(14, 22, 20),
-            Surface = Color.FromArgb(23, 36, 32),
-            TextPrimary = Color.FromArgb(236, 246, 241),
-            TextSecondary = Color.FromArgb(165, 187, 177),
-            Border = Color.FromArgb(53, 76, 67),
+            Background = Color.FromArgb(16, 25, 22),
+            Surface = Color.FromArgb(24, 38, 32),
+            TextPrimary = Color.FromArgb(239, 248, 242),
+            TextSecondary = Color.FromArgb(165, 190, 177),
+            Border = Color.FromArgb(58, 82, 70),
             Accent = Color.FromArgb(142, 174, 161),
             AccentHover = Color.FromArgb(165, 192, 180),
             Danger = Color.FromArgb(235, 113, 105),

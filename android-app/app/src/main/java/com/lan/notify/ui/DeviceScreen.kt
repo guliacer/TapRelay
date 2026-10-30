@@ -1,5 +1,7 @@
 package com.lan.notify.ui
 
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Scaffold
@@ -8,6 +10,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import com.lan.notify.data.AppUiState
 import com.lan.notify.data.HostHistoryEntry
 import com.lan.notify.ui.theme.appColors
@@ -34,14 +37,20 @@ fun DeviceScreen(
     onClearHostHistory: () -> Unit = {}
 ) {
     Scaffold(
+        // 工作台外层已经占位底栏与手势区，页面内不能再次消费系统 inset。
+        contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
         topBar = {
-            TopAppBar(
+            CompactTopAppBar {
+                TopAppBar(
+                modifier = Modifier.fillMaxWidth().height(CompactTopAppBarHeight),
+                windowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
                 title = { Text("设备") },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = appColors.TopBarSage,
                     titleContentColor = appColors.TopBarSageContent
                 )
-            )
+                )
+            }
         },
         containerColor = appColors.Background
     ) { padding ->

@@ -1,16 +1,21 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Globalization;
+using System.Linq;
+using System.Net.Http;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace TapRelay
 {
     /// <summary>
-    /// 个人项目面板：单列卡片流，与手机端 PersonalProjectsDialog 视觉对齐。
+    /// 个人项目面板：双列项目墙，与手机端 PersonalProjectsDialog 共用卡片语汇。
     ///
     /// 卡片结构（自上而下）：
     ///   - 头部条带：左侧主题色 accent 条 + 标题 + 右上 GitHub 图标
@@ -19,9 +24,8 @@ namespace TapRelay
     ///   - 底部分隔线
     ///   - 直达（实心主题色） / 复制（描边） 按钮
     ///
-    /// 不复刻两列紧凑栅格的旧版：那是「图标按钮 + github.com 页脚」，占位密度高但
-    /// 缺少「按项目说事」的语气；当前改用「主题色按钮 + 文字按钮」承担主/次操作，
-    /// 与手机保持一致。
+    /// PC 端使用双列以提高浏览效率；卡片内部仍用「主题色按钮 + 文字按钮」承担主/次操作，
+    /// 并显示最近更新时间，让项目排序依据可被用户直接理解。
     /// </summary>
     internal sealed class PersonalProjectsForm : Form
     {
@@ -39,14 +43,31 @@ namespace TapRelay
         private readonly Panel _scrollBody = new Panel();
         private readonly TableLayoutPanel _cardList = new TableLayoutPanel();
         private readonly ToolTip _toolTip = new ToolTip();
+        private readonly Label _projectCountLabel = new Label();
+        private IReadOnlyList<PersonalProject> _projects = Array.Empty<PersonalProject>();
 
-        private const int HeaderHeight = 76;
-        // 以下三项按手机端 PersonalProjectCard / LazyVerticalGrid 的实际数值对齐，不是拍脑袋定的：
-        //   头部 56 = padding 11 + accent 条 34 + padding 11
-        //   卡高 212 = 头部 56 + 分隔线 1 + 正文(14 + 描述 36 + 14 + 标签 18 + 14) + 分隔线 1 + 14 + 按钮 32 + 12
-        //   卡间距 20 = LazyVerticalGrid verticalArrangement = spacedBy(20.dp)
+        private static readonly HttpClient GitHubClient = CreateGitHubClient();
+        private const string GitHubOwner = "guliacer";
+        private static readonly string[] PinnedProjectNames =
+        {
+            "SuYan",
+            "ComfyUI-GuliNodes",
+            "PixGo"
+        };
+
+        private static readonly HashSet<string> IgnoredProjectNames =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "ComfyUI-GuliNodes-Dependencies",
+                "harvest-match-helper",
+                "suyan-components"
+            };
+
+        private const int HeaderHeight = 84;
+        // PC 页面用双列项目墙承载更多自有仓库：卡片保持舒适的信息密度，
+        // 不再让 10 个项目全部纵向堆叠成一条很长的列表。
         private const int CardHeight = 212;
-        private const int CardGap = 20;
+        private const int CardGap = 16;
         private const int CardHeaderHeight = 56;
         private const int CardCornerRadius = 12;   // 手机端 RoundedCornerShape(12.dp)
         private const int ActionButtonHeight = 32;
@@ -78,19 +99,24 @@ namespace TapRelay
             "M12,3 C14.2,5.4 15.5,8.5 15.5,12 C15.5,15.5 14.2,18.6 12,21 " +
             "M12,3 C9.8,5.4 8.5,8.5 8.5,12 C8.5,15.5 9.8,18.6 12,21";
 
-        // 与手机端 PersonalProjectsDialog 保持一致（10 个真实项目）。
-        private static readonly PersonalProject[] Projects =
+        // GitHub API 不可用时的离线兜底清单。运行时仍会按 pushed_at 重新同步，
+        // 并在客户端再次过滤 fork，避免网络异常时把旧的 fork 项目带回来。
+        private static readonly PersonalProject[] FallbackProjects =
         {
-            new PersonalProject("SuYan", "github.com", "https://github.com/guliacer/SuYan", "为 AI 创作者整理、复用和打磨提示词而生。", "个人项目", "提示词"),
-            new PersonalProject("ComfyUI-GuliNodes", "github.com", "https://github.com/guliacer/ComfyUI-GuliNodes", "ComfyUI 工具合集，囊括多种有用节点与工具。", "个人项目", "ComfyUI", "节点扩展"),
-            new PersonalProject("Prompt Polish 提示词优化器", "github.com", "https://github.com/guliacer/prompt-polish", "轻量级桌面提示词优化器，完整整合提示词润色功能。", "个人项目", "提示词优化", "桌面工具"),
-            new PersonalProject("GetPhoto 图像提取", "github.com", "https://github.com/guliacer/GetPhoto", "油猴插件，适配多站点，支持小红书 AI 爬图。", "个人项目", "油猴插件", "图像提取"),
-            new PersonalProject("PagePurifier 网页优化", "github.com", "https://github.com/guliacer/PagePurifier", "油猴插件，拉黑 B 站广告 UP，精简网页广告。", "个人项目", "油猴插件", "网页净化"),
-            new PersonalProject("Preview 网页图像悬浮工具", "github.com", "https://github.com/guliacer/preview", "油猴插件，鼠标悬停即可查看图像大图。", "个人项目", "油猴插件", "图像预览"),
-            new PersonalProject("VeilReader 网页摸鱼小说工具", "github.com", "https://github.com/guliacer/VeilReader", "油猴插件，摸鱼的钱才是你赚到的钱。", "个人项目", "油猴插件", "摸鱼阅读"),
-            new PersonalProject("CookClick 网页美化", "github.com", "https://github.com/guliacer/cookclick", "油猴插件，点击网页随机生成符号。", "个人项目", "油猴插件", "网页美化"),
-            new PersonalProject("PixGo", "github.com", "https://github.com/guliacer/PixGo", "改善索尼相机无线传图。", "个人项目", "软件", "无线传图"),
-            new PersonalProject("新闻 HTML 日报", "github.com", "https://github.com/guliacer/news-html-digest", "Skill 脚本，抓取新闻，消除信息差。", "个人项目", "Skill", "新闻抓取"),
+            new PersonalProject("ComfyUI-GuliPoses", "github.com", "https://github.com/guliacer/ComfyUI-GuliPoses", "ComfyUI 白模姿态参考图库节点，提供可直接复用的姿态素材。", "ComfyUI", "节点扩展"),
+            new PersonalProject("ComfyUI-GuliNodes", "github.com", "https://github.com/guliacer/ComfyUI-GuliNodes", "面向中文用户习惯的 ComfyUI 实用节点合集。", "ComfyUI", "节点扩展"),
+            new PersonalProject("PixGo", "github.com", "https://github.com/guliacer/PixGo", "使用 AI 编写的照片传输应用，改善相机到安卓设备的传图体验。", "桌面工具", "照片传输"),
+            new PersonalProject("TapRelay", "github.com", "https://github.com/guliacer/TapRelay", "Windows 与 Android 之间的 AI Agent 任务通知中继。", "Windows", "Android"),
+            new PersonalProject("SuYan", "github.com", "https://github.com/guliacer/SuYan", "本地 AI 提示词与图像素材管理工具。", "AI 工具", "提示词"),
+            new PersonalProject("link-slimmer", "github.com", "https://github.com/guliacer/link-slimmer", "轻量的链接整理与分享小工具。", "工具"),
+            new PersonalProject("GetPhoto", "github.com", "https://github.com/guliacer/GetPhoto", "网页图片提取插件，用于快速筛选、预览并下载当前页面图片。", "浏览器脚本", "图像提取"),
+            new PersonalProject("computer-status", "github.com", "https://github.com/guliacer/computer-status", "轻量、常驻桌面的 Windows 系统状态监控悬浮窗。", "Windows", "桌面工具"),
+            new PersonalProject("news-html-digest", "github.com", "https://github.com/guliacer/news-html-digest", "抓取多源新闻并生成北京时间 HTML 日报。", "Skill", "新闻抓取"),
+            new PersonalProject("PagePurifier", "github.com", "https://github.com/guliacer/PagePurifier", "通用网页去广告用户脚本，保持页面清爽。", "浏览器脚本", "网页净化"),
+            new PersonalProject("LShot", "github.com", "https://github.com/guliacer/LShot", "生成当前网页的完整 PNG 长截图。", "浏览器脚本", "截图"),
+            new PersonalProject("preview", "github.com", "https://github.com/guliacer/preview", "面向 Tampermonkey 的图片悬浮预览脚本。", "浏览器脚本", "图像预览"),
+            new PersonalProject("VeilReader", "github.com", "https://github.com/guliacer/VeilReader", "网页隐藏式 TXT 小说阅读器。", "浏览器脚本", "阅读工具"),
+            new PersonalProject("cookclick", "github.com", "https://github.com/guliacer/cookclick", "用于 Tampermonkey / Violentmonkey 的网页互动脚本。", "浏览器脚本", "网页美化"),
         };
 
         public PersonalProjectsForm(bool darkMode)
@@ -106,8 +132,8 @@ namespace TapRelay
             ClientSize = new Size(760, 640);
             Font = new Font(UiTokens.UiFontFamily, UiTokens.BodyFontSize);
             BackColor = _darkMode
-                ? Color.FromArgb(22, 25, 22)
-                : Color.FromArgb(246, 245, 241);
+                ? Color.FromArgb(16, 25, 22)
+                : Color.FromArgb(244, 247, 245);
 
             BuildLayout();
         }
@@ -119,6 +145,8 @@ namespace TapRelay
             {
                 ApplyTitleBarTheme(Handle, _darkMode);
             }
+
+            _ = RefreshProjectsAsync();
         }
 
         private void BuildLayout()
@@ -135,9 +163,10 @@ namespace TapRelay
             _root.RowStyles.Add(new RowStyle(SizeType.Absolute, HeaderHeight));
             _root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             _root.BackColor = colors.Background;
-            _root.Padding = new Padding(20, 14, 20, 14);
+            _root.Padding = new Padding(24, 20, 24, 20);
 
-            // 顶部头部：标题（粗体）+ 副标题（次级色）+ 项目计数（主题强调色）
+            // 顶部头部：标题 + 筛选规则 + 同步状态。把“只展示自有仓库”和排序依据
+            // 直接放在页面上，避免用户误以为列表是手工维护的固定推荐。
             var header = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
@@ -147,9 +176,9 @@ namespace TapRelay
                 Padding = new Padding(0),
                 Margin = new Padding(0)
             };
-            header.RowStyles.Add(new RowStyle(SizeType.Absolute, 28F));
-            header.RowStyles.Add(new RowStyle(SizeType.Absolute, 22F));
-            header.RowStyles.Add(new RowStyle(SizeType.Absolute, 22F));
+            header.RowStyles.Add(new RowStyle(SizeType.Absolute, 30F));
+            header.RowStyles.Add(new RowStyle(SizeType.Absolute, 24F));
+            header.RowStyles.Add(new RowStyle(SizeType.Absolute, 30F));
 
             header.Controls.Add(new Label
             {
@@ -163,7 +192,7 @@ namespace TapRelay
             }, 0, 0);
             header.Controls.Add(new Label
             {
-                Text = "自研节点、脚本与小工具。",
+                Text = "只展示自己拥有的仓库，按最近更新排序；派生项目已隐藏。",
                 Dock = DockStyle.Fill,
                 Font = new Font(UiTokens.UiFontFamily, UiTokens.BodyFontSize, FontStyle.Regular),
                 ForeColor = colors.Muted,
@@ -171,47 +200,274 @@ namespace TapRelay
                 TextAlign = ContentAlignment.MiddleLeft,
                 Margin = new Padding(0)
             }, 0, 1);
-            header.Controls.Add(new Label
-            {
-                // 与手机端 "N 个项目 · 点击查看 GitHub" 对齐；下划线 + 强调色模仿可点击样式
-                Text = $"{Projects.Length} 个项目 · 点击查看 GitHub",
-                Dock = DockStyle.Fill,
-                Font = new Font(UiTokens.UiFontFamily, UiTokens.BodyFontSize, FontStyle.Bold),
-                ForeColor = headerAccent,
-                BackColor = colors.Background,
-                TextAlign = ContentAlignment.MiddleLeft,
-                Margin = new Padding(0)
-            }, 0, 2);
+            _projectCountLabel.Text = "正在读取 GitHub 项目…";
+            _projectCountLabel.Dock = DockStyle.Fill;
+            _projectCountLabel.Font = new Font(UiTokens.UiFontFamily, UiTokens.BodyFontSize, FontStyle.Bold);
+            _projectCountLabel.ForeColor = headerAccent;
+            _projectCountLabel.BackColor = colors.Background;
+            _projectCountLabel.TextAlign = ContentAlignment.MiddleLeft;
+            _projectCountLabel.Margin = new Padding(0);
+            header.Controls.Add(_projectCountLabel, 0, 2);
             _root.Controls.Add(header, 0, 0);
 
             _scrollBody.Dock = DockStyle.Fill;
             _scrollBody.AutoScroll = true;
             _scrollBody.BackColor = colors.Background;
 
-            // 单列卡片流：与手机端 LazyVerticalGrid(columns = 1) 一致
+            // PC 端用双列项目墙提升浏览效率；手机端仍保持自己的单列项目页。
             _cardList.Dock = DockStyle.Top;
             _cardList.AutoSize = true;
             _cardList.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-            _cardList.ColumnCount = 1;
-            _cardList.RowCount = Projects.Length;
+            _cardList.ColumnCount = 2;
+            _cardList.RowCount = 1;
+            _cardList.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            _cardList.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
             _cardList.BackColor = colors.Background;
             _cardList.Padding = new Padding(0);
             _cardList.Margin = new Padding(0);
-            for (var row = 0; row < Projects.Length; row++)
-            {
-                _cardList.RowStyles.Add(new RowStyle(SizeType.Absolute, CardHeight + (row == Projects.Length - 1 ? 0 : CardGap)));
-            }
-            for (var i = 0; i < Projects.Length; i++)
-            {
-                var card = BuildCard(Projects[i], i);
-                card.Dock = DockStyle.Top;
-                card.Margin = new Padding(0, 0, 0, i == Projects.Length - 1 ? 0 : CardGap);
-                _cardList.Controls.Add(card, 0, i);
-            }
+            _scrollBody.Resize += (_, __) => ResizeCardList();
             _scrollBody.Controls.Add(_cardList);
 
             _root.Controls.Add(_scrollBody, 0, 1);
             Controls.Add(_root);
+            RenderProjects(FallbackProjects, "正在同步 GitHub…");
+        }
+
+        private void ResizeCardList()
+        {
+            if (_scrollBody.IsDisposed || _cardList.IsDisposed)
+            {
+                return;
+            }
+
+            var width = _scrollBody.ClientSize.Width;
+            if (_scrollBody.VerticalScroll.Visible)
+            {
+                width -= SystemInformation.VerticalScrollBarWidth;
+            }
+
+            _cardList.Width = Math.Max(0, width);
+        }
+
+        private void RenderProjects(IReadOnlyList<PersonalProject> projects, string status)
+        {
+            if (IsDisposed || _cardList.IsDisposed)
+            {
+                return;
+            }
+
+            _projects = OrderProjects(projects ?? Array.Empty<PersonalProject>());
+            _cardList.SuspendLayout();
+            try
+            {
+                foreach (Control control in _cardList.Controls.Cast<Control>().ToArray())
+                {
+                    _cardList.Controls.Remove(control);
+                    control.Dispose();
+                }
+
+                _cardList.RowStyles.Clear();
+                _cardList.ColumnStyles.Clear();
+                _cardList.ColumnCount = 2;
+                _cardList.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+                _cardList.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+
+                var rowCount = Math.Max(1, (int)Math.Ceiling(_projects.Count / 2d));
+                _cardList.RowCount = rowCount;
+                for (var row = 0; row < rowCount; row++)
+                {
+                    var isLastRow = row == rowCount - 1;
+                    _cardList.RowStyles.Add(new RowStyle(
+                        SizeType.Absolute,
+                        CardHeight + (isLastRow ? 0 : CardGap)));
+                }
+
+                for (var i = 0; i < _projects.Count; i++)
+                {
+                    var column = i % 2;
+                    var row = i / 2;
+                    var card = BuildCard(_projects[i], i);
+                    card.Dock = DockStyle.Fill;
+                    card.Margin = new Padding(
+                        column == 0 ? 0 : CardGap / 2,
+                        0,
+                        column == 0 ? CardGap / 2 : 0,
+                        row == rowCount - 1 ? 0 : CardGap);
+                    _cardList.Controls.Add(card, column, row);
+                }
+            }
+            finally
+            {
+                _cardList.ResumeLayout(true);
+            }
+
+            var pinnedCount = _projects.Count(project => PinnedProjectNames.Any(name =>
+                string.Equals(name, project.Title, StringComparison.OrdinalIgnoreCase)));
+            _projectCountLabel.Text =
+                $"{_projects.Count} 个项目 · 置顶 {pinnedCount} 个 · {status}";
+            ResizeCardList();
+        }
+
+        private async Task RefreshProjectsAsync()
+        {
+            try
+            {
+                using var request = new HttpRequestMessage(
+                    HttpMethod.Get,
+                    $"https://api.github.com/users/{GitHubOwner}/repos?type=owner&sort=pushed&direction=desc&per_page=100");
+                using var response = await GitHubClient.SendAsync(
+                    request,
+                    HttpCompletionOption.ResponseHeadersRead);
+                response.EnsureSuccessStatusCode();
+
+                var payload = await response.Content.ReadAsStringAsync();
+                var projects = ParseGitHubProjects(payload);
+                if (projects.Count == 0)
+                {
+                    throw new InvalidOperationException("GitHub 没有返回可展示的自有项目。");
+                }
+
+                RenderProjects(projects, $"最近同步 {DateTime.Now:HH:mm}");
+            }
+            catch (Exception)
+            {
+                // 页面打开不能被网络问题阻塞：保留本地清单，并明确告知当前数据不是实时同步结果。
+                RenderProjects(
+                    _projects.Count > 0 ? _projects : FallbackProjects,
+                    "网络不可用，已显示本地清单");
+            }
+        }
+
+        private static IReadOnlyList<PersonalProject> ParseGitHubProjects(string payload)
+        {
+            using var document = JsonDocument.Parse(payload);
+            var projects = new List<PersonalProject>();
+
+            foreach (var repo in document.RootElement.EnumerateArray())
+            {
+                if (repo.ValueKind != JsonValueKind.Object ||
+                    (repo.TryGetProperty("fork", out var fork) && fork.ValueKind == JsonValueKind.True))
+                {
+                    continue;
+                }
+
+                if (repo.TryGetProperty("owner", out var owner) &&
+                    owner.TryGetProperty("login", out var login) &&
+                    !string.Equals(login.GetString(), GitHubOwner, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var name = ReadString(repo, "name");
+                var url = ReadString(repo, "html_url");
+                if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(url))
+                {
+                    continue;
+                }
+
+                var description = ReadString(repo, "description");
+                if (string.IsNullOrWhiteSpace(description))
+                {
+                    description = "个人开源项目，点击查看 GitHub 详情。";
+                }
+
+                DateTimeOffset? updatedAt = null;
+                var pushedAt = ReadString(repo, "pushed_at");
+                if (DateTimeOffset.TryParse(pushedAt, CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal, out var parsedPushedAt))
+                {
+                    updatedAt = parsedPushedAt;
+                }
+                else if (DateTimeOffset.TryParse(ReadString(repo, "updated_at"),
+                    CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsedUpdatedAt))
+                {
+                    updatedAt = parsedUpdatedAt;
+                }
+
+                var tags = new List<string>();
+                if (updatedAt.HasValue)
+                {
+                    tags.Add("更新 " + updatedAt.Value.ToLocalTime().ToString("MM/dd"));
+                }
+
+                var language = ReadString(repo, "language");
+                if (!string.IsNullOrWhiteSpace(language))
+                {
+                    tags.Add(language);
+                }
+
+                if (repo.TryGetProperty("topics", out var topics) && topics.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var topic in topics.EnumerateArray().Take(1))
+                    {
+                        var topicText = topic.GetString();
+                        if (!string.IsNullOrWhiteSpace(topicText))
+                        {
+                            tags.Add(topicText);
+                        }
+                    }
+                }
+
+                if (tags.Count == 0)
+                {
+                    tags.Add("GitHub");
+                }
+
+                projects.Add(new PersonalProject(
+                    name,
+                    "github.com",
+                    url,
+                    description,
+                    updatedAt,
+                    tags.ToArray()));
+            }
+
+            return OrderProjects(projects);
+        }
+
+        private static IReadOnlyList<PersonalProject> OrderProjects(IEnumerable<PersonalProject> source)
+        {
+            var visible = source
+                .Where(project => !IgnoredProjectNames.Contains(project.Title))
+                .GroupBy(project => project.Title, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToList();
+
+            var pinned = PinnedProjectNames
+                .Select(name => visible.FirstOrDefault(project =>
+                    string.Equals(project.Title, name, StringComparison.OrdinalIgnoreCase)))
+                .Where(project => project != null)
+                .Cast<PersonalProject>()
+                .ToList();
+
+            var pinnedNames = new HashSet<string>(
+                pinned.Select(project => project.Title),
+                StringComparer.OrdinalIgnoreCase);
+            var rest = visible
+                .Where(project => !pinnedNames.Contains(project.Title))
+                .OrderByDescending(project => project.UpdatedAtUtc ?? DateTimeOffset.MinValue)
+                .ThenBy(project => project.Title, StringComparer.OrdinalIgnoreCase);
+
+            return pinned.Concat(rest).ToArray();
+        }
+
+        private static string ReadString(JsonElement element, string propertyName)
+        {
+            return element.TryGetProperty(propertyName, out var property) &&
+                   property.ValueKind == JsonValueKind.String
+                ? property.GetString() ?? string.Empty
+                : string.Empty;
+        }
+
+        private static HttpClient CreateGitHubClient()
+        {
+            var client = new HttpClient
+            {
+                Timeout = TimeSpan.FromSeconds(8)
+            };
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("TapRelay-PC/0.3");
+            client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+            return client;
         }
 
         private Control BuildCard(PersonalProject project, int index)
@@ -710,11 +966,23 @@ namespace TapRelay
         private sealed class PersonalProject
         {
             public PersonalProject(string title, string domain, string url, string description, params string[] tags)
+                : this(title, domain, url, description, null, tags)
+            {
+            }
+
+            public PersonalProject(
+                string title,
+                string domain,
+                string url,
+                string description,
+                DateTimeOffset? updatedAtUtc,
+                params string[] tags)
             {
                 Title = title;
                 Domain = domain;
                 Url = url;
                 Description = description;
+                UpdatedAtUtc = updatedAtUtc;
                 Tags = tags ?? Array.Empty<string>();
             }
 
@@ -722,6 +990,7 @@ namespace TapRelay
             public string Domain { get; }
             public string Url { get; }
             public string Description { get; }
+            public DateTimeOffset? UpdatedAtUtc { get; }
             public string[] Tags { get; }
         }
 
@@ -749,12 +1018,12 @@ namespace TapRelay
             // 与手机端 projectCardTone 完全一致（浅色）。
             private static readonly Palette Light = new Palette
             {
-                Background = Color.FromArgb(246, 245, 241),
-                Panel = Color.FromArgb(251, 250, 247),
-                Muted = Color.FromArgb(126, 133, 128),
+                Background = Color.FromArgb(244, 247, 245),
+                Panel = Color.FromArgb(255, 255, 255),
+                Muted = Color.FromArgb(99, 118, 109),
                 Shadow = Color.FromArgb(30, 24, 24, 20),
                 ShadowHover = Color.FromArgb(60, 24, 24, 20),
-                TextPrimary = Color.FromArgb(32, 37, 33),
+                TextPrimary = Color.FromArgb(24, 45, 38),
                 Tones = new[]
                 {
                     new CardTone { Border = Color.FromArgb(0xC9, 0xD5, 0xC6), Header = Color.FromArgb(0xE7, 0xED, 0xE4), Tag = Color.FromArgb(0xE7, 0xED, 0xE4), Foreground = Color.FromArgb(0x42, 0x59, 0x4D), ForegroundDim = Color.FromArgb(0x80, 0x42, 0x59, 0x4D) },
@@ -771,12 +1040,12 @@ namespace TapRelay
             // 与手机端 projectCardTone dark 一致。
             private static readonly Palette Dark = new Palette
             {
-                Background = Color.FromArgb(22, 25, 22),
-                Panel = Color.FromArgb(28, 32, 28),
-                Muted = Color.FromArgb(148, 155, 150),
+                Background = Color.FromArgb(16, 25, 22),
+                Panel = Color.FromArgb(24, 38, 32),
+                Muted = Color.FromArgb(165, 190, 177),
                 Shadow = Color.FromArgb(60, 0, 0, 0),
                 ShadowHover = Color.FromArgb(110, 0, 0, 0),
-                TextPrimary = Color.FromArgb(232, 240, 234),
+                TextPrimary = Color.FromArgb(239, 248, 242),
                 Tones = new[]
                 {
                     new CardTone { Border = Color.FromArgb(0x3D, 0x4B, 0x40), Header = Color.FromArgb(0x26, 0x31, 0x29), Tag = Color.FromArgb(0x26, 0x31, 0x29), Foreground = Color.FromArgb(0xC7, 0xDB, 0xC9), ForegroundDim = Color.FromArgb(0xA0, 0xC7, 0xDB, 0xC9) },

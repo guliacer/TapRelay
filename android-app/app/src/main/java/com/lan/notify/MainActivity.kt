@@ -25,6 +25,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import com.lan.notify.data.ConnectionQrCodec
@@ -91,6 +92,15 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 主页面与顶部/底部系统栏使用同一层背景，避免真机上出现明显的白色空带。
+        // Compose 各页面的 TopAppBar / NavigationBar 会自行消费安全区 inset，
+        // 内容仍不会被状态栏和手势条遮挡。
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isNavigationBarContrastEnforced = false
+        }
         handleMessageIntent(intent)
         setContent {
             val themeMode by MessageRepository.themeMode.collectAsState()

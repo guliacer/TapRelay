@@ -112,6 +112,8 @@ fun MainScreen(
     var showPersonalProjectsDialog by rememberSaveable { mutableStateOf(false) }
 
     Scaffold(
+        // 工作台外层已经占位底栏与手势区，页面内不能再次消费系统 inset。
+        contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
         topBar = {
             // 浅色主题顶栏用淡鼠尾草绿底 + 深鼠尾草绿字/图标（与品牌 PrimarySage 同系，
             // 色值取自 appColors.TopBarSage，与主按钮填充同源统一）：
@@ -120,7 +122,10 @@ fun MainScreen(
                 (themeMode != ThemeMode.SYSTEM || !isSystemInDarkTheme())
             val topBarContainer = if (isLightTopBar) appColors.TopBarSage else MaterialTheme.colorScheme.surface
             val topBarContent = if (isLightTopBar) appColors.TopBarSageContent else MaterialTheme.colorScheme.onSurface
-            TopAppBar(
+            CompactTopAppBar(containerColor = topBarContainer) {
+                TopAppBar(
+                modifier = Modifier.fillMaxWidth().height(CompactTopAppBarHeight),
+                windowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
                 title = { Text("\u4efb\u52a1\u901a\u77e5") },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = topBarContainer,
@@ -141,14 +146,17 @@ fun MainScreen(
                         modifier = Modifier.padding(end = 12.dp)
                     )
                 }
-            )
+                )
+            }
         }
     ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(16.dp)
+                // 底部由工作台 Scaffold 的底栏占位负责，页面本身不能再留一整段底部空白。
+                .padding(horizontal = 16.dp)
+                .padding(top = 16.dp)
         ) {
             CompactConnectionStatus(
                 uiState = uiState,

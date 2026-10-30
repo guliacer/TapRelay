@@ -106,10 +106,10 @@ fun MainScreen(
     hostMasked: Boolean = false,
     onHostMaskedChange: (Boolean) -> Unit = {},
     onClearHostHistory: () -> Unit = {},
+    onOpenDeviceManagement: () -> Unit = {},
     onOpenComfyUi: () -> Unit = {}
 ) {
     var showPersonalProjectsDialog by rememberSaveable { mutableStateOf(false) }
-    var showDeviceControlSheet by rememberSaveable { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -128,23 +128,15 @@ fun MainScreen(
                     actionIconContentColor = topBarContent
                 ),
                 actions = {
-                    ComfyUiIconButton(
-                        onClick = onOpenComfyUi,
-                        tint = topBarContent,
-                        modifier = Modifier.padding(end = 8.dp)
-                    )
-                    PersonalProjectsIconButton(
-                        onClick = { showPersonalProjectsDialog = true },
-                        tint = topBarContent,
-                        modifier = Modifier.padding(end = 8.dp)
-                    )
-                    ThemeIconButton(
+                    MoreActionsMenu(
                         themeMode = themeMode,
-                        onClick = {
+                        onToggleTheme = {
                             onThemeModeChange(
                                 if (themeMode == ThemeMode.LIGHT) ThemeMode.DARK else ThemeMode.LIGHT
                             )
                         },
+                        onOpenProjects = { showPersonalProjectsDialog = true },
+                        onOpenPermissions = onOpenPermissionCheck,
                         tint = topBarContent,
                         modifier = Modifier.padding(end = 12.dp)
                     )
@@ -161,7 +153,7 @@ fun MainScreen(
             CompactConnectionStatus(
                 uiState = uiState,
                 deviceName = deviceName,
-                onOpenDeviceManagement = { showDeviceControlSheet = true },
+                onOpenDeviceManagement = onOpenDeviceManagement,
                 onConnect = onConnect,
                 onScanQr = onScanQr
             )
@@ -233,11 +225,58 @@ fun MainScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             if (uiState.messages.isEmpty()) {
-                Text(
-                    text = "\u6682\u65e0\u6d88\u606f",
-                    color = appColors.TextSecondary,
-                    modifier = Modifier.weight(1f)
-                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = appColors.Surface
+                        ),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(20.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "暂无任务消息",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = appColors.TextPrimary
+                            )
+                            Text(
+                                text = if (uiState.connectionStatus == ConnectionStatus.Connected) {
+                                    "PC 已连接，新的任务完成后会自动出现在这里"
+                                } else {
+                                    "先连接 PC，任务完成后通知会自动出现在这里"
+                                },
+                                color = appColors.TextSecondary,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            if (uiState.connectionStatus != ConnectionStatus.Connected) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    PlainButton(
+                                        text = "重新连接",
+                                        onClick = onConnect,
+                                        enabled = uiState.serverHost.isNotBlank(),
+                                        variant = PlainButtonVariant.PRIMARY
+                                    )
+                                    PlainButton(
+                                        text = "扫码连接",
+                                        onClick = onScanQr,
+                                        variant = PlainButtonVariant.SECONDARY
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             } else {
                 val listState = rememberLazyListState()
                 val scope = rememberCoroutineScope()
@@ -363,28 +402,6 @@ fun MainScreen(
 
     if (showPersonalProjectsDialog) {
         PersonalProjectsDialog(onDismiss = { showPersonalProjectsDialog = false })
-    }
-
-    if (showDeviceControlSheet) {
-        DeviceControlSheet(
-            uiState = uiState,
-            deviceName = deviceName,
-            onDeviceNameChange = onDeviceNameChange,
-            onServerHostChange = onServerHostChange,
-            dynamicEffectsEnabled = dynamicEffectsEnabled,
-            onDynamicEffectsChange = onDynamicEffectsChange,
-            onScanQr = onScanQr,
-            onConnect = onConnect,
-            onDisconnect = onDisconnect,
-            onSleep = onSleep,
-            onShutdown = onShutdown,
-            onOpenPermissionCheck = onOpenPermissionCheck,
-            hostHistory = hostHistory,
-            hostMasked = hostMasked,
-            onHostMaskedChange = onHostMaskedChange,
-            onClearHostHistory = onClearHostHistory,
-            onDismiss = { showDeviceControlSheet = false }
-        )
     }
 
 }

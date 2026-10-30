@@ -147,6 +147,9 @@ class MainActivity : ComponentActivity() {
                                 hostMasked = hostMasked,
                                 onHostMaskedChange = MessageRepository::setHostMasked,
                                 onClearHostHistory = MessageRepository::clearHostHistory,
+                                onOpenDeviceManagement = {
+                                    activeDestination = AppDestination.DEVICE
+                                },
                                 onClearHistory = {
                                     NotificationHelper.clearTaskNotifications(
                                         this,

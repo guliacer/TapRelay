@@ -106,6 +106,9 @@ class MainActivity : ComponentActivity() {
                     showPermissionCheck = false
                     MessageRepository.completeOnboarding()
                 }
+                BackHandler(enabled = !showPermissionCheck && activeDestination != AppDestination.TASK) {
+                    activeDestination = AppDestination.TASK
+                }
                 if (showPermissionCheck) {
                     PermissionCheckScreen(
                         onboarding = !MessageRepository.isOnboardingDone,
@@ -165,7 +168,8 @@ class MainActivity : ComponentActivity() {
                         comfyUi = {
                             ComfyUiScreen(
                                 serverHost = uiState.serverHost,
-                                onBack = { activeDestination = AppDestination.TASK }
+                                onBack = { activeDestination = AppDestination.TASK },
+                                embedded = true
                             )
                         },
                         device = {

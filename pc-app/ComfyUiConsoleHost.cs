@@ -2622,26 +2622,34 @@ namespace TapRelay
         {
             var controllerGroups =
                 new Dictionary<string, List<GgControllerGroup>>(StringComparer.Ordinal);
-            foreach (var workflowPath in Directory.GetFiles(
-                         workflowsDirectory, "*.workflow.json", SearchOption.TopDirectoryOnly))
+            foreach (var apiPath in Directory.GetFiles(
+                         workflowsDirectory, "*.api.json", SearchOption.TopDirectoryOnly))
             {
-                var fileName = Path.GetFileName(workflowPath);
-                var baseName = fileName.Substring(0, fileName.Length - ".workflow.json".Length);
-                var apiPath = Path.Combine(workflowsDirectory, baseName + ".api.json");
+                var fileName = Path.GetFileName(apiPath);
+                var baseName = fileName.Substring(0, fileName.Length - ".api.json".Length);
                 var uiPath = Path.Combine(workflowsDirectory, baseName + ".ui.json");
-                if (!File.Exists(apiPath) || !File.Exists(uiPath)) continue;
+                if (!File.Exists(uiPath)) continue;
 
                 try
                 {
-                    var options = ReadGgOptions(workflowPath);
+                    // 随包与自动重转的工作流带的是转换器写好的 .gg.json；
+                    // 留有浏览器图的导入工作流直接从图上读取完整选项与编组。
+                    var workflowPath = Path.Combine(workflowsDirectory, baseName + ".workflow.json");
+                    var ggPath = Path.Combine(workflowsDirectory, baseName + ".gg.json");
+                    var options = File.Exists(workflowPath)
+                        ? ReadGgOptions(workflowPath)
+                        : ReadGgOptionsFile(ggPath);
                     if (options.Count == 0) continue;
                     ApplyGgOptionsToUi(uiPath, options);
-                    EnsureGgControllerNodes(apiPath, options);
-                    var groups = ReadGgControllerGroups(workflowPath, options);
+                    var groups = File.Exists(workflowPath)
+                        ? ReadGgControllerGroups(workflowPath, options)
+                        : ReadGgControllerGroupsFile(ggPath, options);
+                    if (!File.Exists(workflowPath) && groups.Count == 0)
+                        groups = ReadApiControllerGroups(apiPath, options);
                     _log("GG 选项同步：" + baseName + "，选项 " + options.Count +
                          "，控制器编组 " + groups.Count);
                     if (groups.Count > 0)
-                        controllerGroups[Path.GetFileName(apiPath)] = groups;
+                        controllerGroups[fileName] = groups;
                 }
                 catch (Exception error)
                 {
@@ -2708,8 +2716,10 @@ namespace TapRelay
                 var slot = 0;
                 foreach (var output in outputs.EnumerateArray())
                 {
-                    var currentSlot = slot++;
                     if (output.ValueKind != JsonValueKind.Object) continue;
+                    // "*" 空位没有控件，也不占 widgets_values 的槽位。
+                    if (ReadWidgetName(output) == null) continue;
+                    var currentSlot = slot++;
                     if (!output.TryGetProperty("links", out var outputLinks) ||
                         outputLinks.ValueKind != JsonValueKind.Array ||
                         outputLinks.GetArrayLength() == 0)
@@ -2742,6 +2752,134 @@ namespace TapRelay
                 }
             }
 
+            return result;
+        }
+
+        /// <summary>
+        /// 读转换器写好的 .gg.json 里的选项：每条 key 是 option 落到目标控件的
+        /// `节点.输入`。启动时 .gg.json 由转换器重写，目标类型从 api 图补。
+        /// </summary>
+        private static List<GgOption> ReadGgOptionsFile(string ggPath)
+        {
+            var result = new List<GgOption>();
+            if (!File.Exists(ggPath)) return result;
+            var apiPath = ggPath.Substring(0, ggPath.Length - ".gg.json".Length) + ".api.json";
+            var types = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (File.Exists(apiPath))
+            {
+                using var api = JsonDocument.Parse(File.ReadAllText(apiPath));
+                if (api.RootElement.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var node in api.RootElement.EnumerateObject())
+                        types[node.Name] = ReadString(node.Value, "class_type") ?? "";
+                }
+            }
+
+            using var document = JsonDocument.Parse(
+                File.ReadAllText(ggPath),
+                new JsonDocumentOptions { MaxDepth = 32 });
+            if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                !document.RootElement.TryGetProperty("options", out var options) ||
+                options.ValueKind != JsonValueKind.Array)
+                return result;
+
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var option in options.EnumerateArray())
+            {
+                if (option.ValueKind != JsonValueKind.Object) continue;
+                var label = ReadString(option, "label") ?? "";
+                foreach (var key in ReadOptionKeys(option))
+                {
+                    if (!seen.Add(key)) continue;
+                    var dot = key.IndexOf('.');
+                    if (dot <= 0 || dot == key.Length - 1) continue;
+                    var nodeId = key.Substring(0, dot);
+                    var input = key.Substring(dot + 1);
+                    types.TryGetValue(nodeId, out var type);
+                    result.Add(new GgOption(key, label, nodeId, type ?? "", input));
+                }
+            }
+            return result;
+        }
+
+        /// <summary>一条选项管着的所有控件键：multi 在 keys 里，其余就是 key 本身。</summary>
+        private static IEnumerable<string> ReadOptionKeys(JsonElement option)
+        {
+            if (string.Equals(ReadString(option, "kind"), "multi", StringComparison.Ordinal) &&
+                option.TryGetProperty("keys", out var keys) && keys.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var key in keys.EnumerateArray())
+                    if (key.ValueKind == JsonValueKind.String) yield return key.GetString() ?? string.Empty;
+                yield break;
+            }
+            var single = ReadString(option, "key");
+            if (!string.IsNullOrEmpty(single)) yield return single!;
+        }
+
+        /// <summary>
+        /// 旧版 sidecar 没有成员元数据时，仅能回退到控制器节点自身。
+        /// </summary>
+        private static List<GgControllerGroup> ReadApiControllerGroups(
+            string apiPath, List<GgOption> options)
+        {
+            var result = new List<GgControllerGroup>();
+            using var document = JsonDocument.Parse(
+                File.ReadAllText(apiPath),
+                new JsonDocumentOptions { MaxDepth = 32 });
+            if (document.RootElement.ValueKind != JsonValueKind.Object) return result;
+
+            var keysByController = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+            foreach (var option in options)
+            {
+                if (!document.RootElement.TryGetProperty(option.TargetNode, out var target)) continue;
+                var type = ReadString(target, "class_type") ?? "";
+                if (!type.StartsWith("GGGroupController", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!keysByController.TryGetValue(option.TargetNode, out var keys))
+                    keysByController[option.TargetNode] = keys = new List<string>();
+                if (!keys.Contains(option.Key)) keys.Add(option.Key);
+            }
+
+            foreach (var pair in keysByController)
+            {
+                // API 图里没有分组框信息，无法推算组内节点；
+                // 只记控制器节点本身，ComfyUI 的 group controller 机制会旁路组内节点。
+                result.Add(new GgControllerGroup(pair.Value[0], new List<string> { pair.Key }));
+            }
+            return result;
+        }
+
+        private static List<GgControllerGroup> ReadGgControllerGroupsFile(
+            string ggPath, List<GgOption> options)
+        {
+            var result = new List<GgControllerGroup>();
+            if (!File.Exists(ggPath)) return result;
+
+            var optionKeys = new HashSet<string>(options.Select(option => option.Key), StringComparer.Ordinal);
+            using var document = JsonDocument.Parse(
+                File.ReadAllText(ggPath),
+                new JsonDocumentOptions { MaxDepth = 32 });
+            if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                !document.RootElement.TryGetProperty("controllerGroups", out var groups) ||
+                groups.ValueKind != JsonValueKind.Array)
+                return result;
+
+            foreach (var group in groups.EnumerateArray())
+            {
+                if (group.ValueKind != JsonValueKind.Object) continue;
+                var optionKey = ReadString(group, "optionKey");
+                if (string.IsNullOrWhiteSpace(optionKey) || !optionKeys.Contains(optionKey!)) continue;
+                if (!group.TryGetProperty("mutedNodes", out var nodes) ||
+                    nodes.ValueKind != JsonValueKind.Array)
+                    continue;
+
+                var muted = new List<string>();
+                foreach (var node in nodes.EnumerateArray())
+                {
+                    var id = ReadNodeIdValue(node);
+                    if (!string.IsNullOrWhiteSpace(id) && !muted.Contains(id!)) muted.Add(id!);
+                }
+                if (muted.Count > 0) result.Add(new GgControllerGroup(optionKey!, muted));
+            }
             return result;
         }
 

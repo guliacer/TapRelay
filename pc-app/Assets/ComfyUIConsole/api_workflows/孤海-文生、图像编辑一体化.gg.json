@@ -1,0 +1,12 @@
+{
+  "fields": [
+    "199.文本",
+    "12.steps",
+    "39.比例",
+    "39.百万像素",
+    "8.unet_name",
+    "194.lora_name",
+    "194.strength_model"
+  ],
+  "options": []
+}

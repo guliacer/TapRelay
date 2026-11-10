@@ -15,11 +15,13 @@ internal static class Program
     private static int _passed;
     private static int _skipped;
     private static bool _liveFreebuff;
+    private static bool _liveCloudflared;
     private static readonly List<string> Failures = new List<string>();
 
     private static int Main(string[] args)
     {
         _liveFreebuff = args.Contains("--live-freebuff", StringComparer.Ordinal);
+        _liveCloudflared = args.Contains("--live-cloudflared", StringComparer.Ordinal);
         Test("ZCode CLI Windows path is supported", () =>
             AgentLogPaths.IsSupportedFile(@"C:\Users\alice\.zcode\cli\log\zcode-2026-07-31.jsonl"));
         Test("ZCode CLI Unix path is supported", () =>
@@ -2725,6 +2727,190 @@ internal static class Program
             finally { File.Delete(file); }
         });
 
+        Test("Cloudflared health parses ha_connections / requests from metrics text", () =>
+        {
+            var text =
+                "# HELP cloudflared_tunnel_ha_connections Number of active ha connections\n" +
+                "# TYPE cloudflared_tunnel_ha_connections gauge\n" +
+                "cloudflared_tunnel_ha_connections 4\n" +
+                "# TYPE cloudflared_tunnel_total_requests counter\n" +
+                "cloudflared_tunnel_total_requests 12\n" +
+                "cloudflared_tunnel_tunnel_register_success{rpcName=\"registerConnection\"} 4\n" +
+                "cloudflared_tunnel_server_locations{connection_id=\"0\",edge_location=\"lax01\"} 1\n" +
+                "cloudflared_tunnel_server_locations{connection_id=\"1\",edge_location=\"lax13\"} 1\n" +
+                "cloudflared_tunnel_server_locations{connection_id=\"2\",edge_location=\"sin01\"} 0\n";
+            return CloudflaredTunnelHealth.ReadMetricValue(text, "cloudflared_tunnel_ha_connections") == 4 &&
+                   CloudflaredTunnelHealth.ReadMetricValue(text, "cloudflared_tunnel_total_requests") == 12 &&
+                   CloudflaredTunnelHealth.ReadMetricValue(text, "cloudflared_tunnel_tunnel_register_success") == 4 &&
+                   CloudflaredTunnelHealth.ReadMetricValue(text, "cloudflared_tunnel_request_errors") == 0 &&
+                   CloudflaredTunnelHealth.ReadMetricValue("", "cloudflared_tunnel_ha_connections") == 0;
+        });
+
+        Test("Cloudflared health extracts current edge locations only", () =>
+        {
+            var text =
+                "cloudflared_tunnel_server_locations{connection_id=\"0\",edge_location=\"lax01\"} 1\n" +
+                "cloudflared_tunnel_server_locations{connection_id=\"1\",edge_location=\"lax13\"} 1\n" +
+                "cloudflared_tunnel_server_locations{connection_id=\"2\",edge_location=\"sin01\"} 0\n";
+            var locations = CloudflaredTunnelHealth.ReadLocations(text);
+            return locations.Count == 2 && locations[0] == "lax01" && locations[1] == "lax13";
+        });
+
+        Test("Cloudflared health DescribeHttpStatus extracts Cloudflare error code", () =>
+        {
+            return CloudflaredTunnelHealth.DescribeHttpStatus(530, "error code: 1033\n") ==
+                       "HTTP 530 / error code 1033" &&
+                   CloudflaredTunnelHealth.DescribeHttpStatus(200, "{\"status\":\"ok\"}") == "HTTP 200" &&
+                   CloudflaredTunnelHealth.DescribeHttpStatus(502, "<html>Bad Gateway</html>") == "HTTP 502";
+        });
+
+        Test("Cloudflared health snapshot describe covers three states", () =>
+        {
+            var offline = new CloudflaredTunnelHealth.Snapshot();
+            if (offline.Describe() != "cloudflared 未运行")
+            {
+                return false;
+            }
+
+            var connecting = new CloudflaredTunnelHealth.Snapshot
+            {
+                ProcessRunning = true,
+                MetricsFound = true,
+                HaConnections = 0
+            };
+            if (connecting.Describe() != "cloudflared 正在重试连接 Cloudflare 边缘" || connecting.EdgeConnected)
+            {
+                return false;
+            }
+
+            var online = new CloudflaredTunnelHealth.Snapshot
+            {
+                ProcessRunning = true,
+                MetricsFound = true,
+                HaConnections = 4
+            };
+            online.Locations.Add("lax01");
+            return online.EdgeConnected && online.Describe() == "已连边缘 4 条（lax01）";
+        });
+
+        Test("Cloudflared edge probe separates tcp / tls / 443 failures", () =>
+        {
+            var tlsBlocked = new CloudflaredTunnelHealth.EdgeProbe
+            {
+                Targets = 4,
+                Tcp7844 = 4,
+                Tls7844 = 0,
+                Tcp443 = 4,
+                LatencyMs = 1234
+            };
+            var portBlocked = new CloudflaredTunnelHealth.EdgeProbe
+            {
+                Targets = 4,
+                Tcp7844 = 0,
+                Tls7844 = 0,
+                Tcp443 = 2,
+                LatencyMs = 900
+            };
+            var healthy = new CloudflaredTunnelHealth.EdgeProbe
+            {
+                Targets = 4,
+                Tcp7844 = 4,
+                Tls7844 = 4,
+                Tcp443 = 4,
+                LatencyMs = 90
+            };
+            var unresolved = new CloudflaredTunnelHealth.EdgeProbe();
+            return tlsBlocked.TunnelPortReachable && tlsBlocked.TlsInterfered &&
+                   tlsBlocked.Describe() == "7844 端口 TCP 4/4 可连、TLS 0/4 握手成功，443 端口 TCP 4/4 可连（1234ms）" &&
+                   !portBlocked.TunnelPortReachable && !portBlocked.TlsInterfered &&
+                   healthy.TunnelPortReachable && !healthy.TlsInterfered &&
+                   unresolved.Describe() == "边缘地址解析失败";
+        });
+
+        Test("Cloudflared restarts a running service when edge connections are lost", () =>
+        {
+            var method = typeof(CloudflaredTunnelRepair).GetMethod(
+                "NeedsServiceRestart",
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+            if (method == null) return false;
+            return (bool)method.Invoke(null, new object[] { false, true, false })! &&
+                   !(bool)method.Invoke(null, new object[] { false, true, true })! &&
+                   (bool)method.Invoke(null, new object[] { true, true, true })! &&
+                   (bool)method.Invoke(null, new object[] { false, false, true })!;
+        });
+
+        Test("Cloudflared manual launch does not create undrained output pipes", () =>
+        {
+            var method = typeof(CloudflaredTunnelRepair).GetMethod(
+                "BuildManualTunnelStartInfo",
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+            if (method == null) return false;
+            var startInfo = (ProcessStartInfo?)method.Invoke(null,
+                new object[] { "cloudflared.exe", @"C:\tmp\config.yml", "demo" });
+            return startInfo != null &&
+                   !startInfo.RedirectStandardOutput &&
+                   !startInfo.RedirectStandardError &&
+                   startInfo.ArgumentList.Count == 5 &&
+                   startInfo.ArgumentList[0] == "--config" &&
+                   startInfo.ArgumentList[4] == "demo";
+        });
+
+        Test("Cloudflared candidate summary retains an earlier 1033 diagnosis", () =>
+        {
+            var method = typeof(CloudflaredTunnelRepair).GetMethod(
+                "HasCloudflare1033",
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+            if (method == null) return false;
+            var failures = new[]
+            {
+                "first.example -> HTTP 530 error code 1033",
+                "second.example -> DNS name does not exist"
+            };
+            var summaryMethod = typeof(CloudflaredTunnelRepair).GetMethod(
+                "FormatEndpointFailures",
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+            if (summaryMethod == null) return false;
+            var summary = (string)summaryMethod.Invoke(null, new object[] { failures })!;
+            return (bool)method.Invoke(null, new object[] { failures })! &&
+                   summary.Contains("first.example") && summary.Contains("second.example");
+        });
+
+        TestLiveCloudflared("Live: discovers running cloudflared metrics port and edge state", () =>
+        {
+            // 依赖本机正在运行的 cloudflared（Windows 服务）。核心验证"随机指标端口发现"
+            // 机制；边缘连接数随本机网络波动（0↔4），不作为断言，只打印真实状态。
+            var snapshot = CloudflaredTunnelHealth.Read();
+            Console.WriteLine("  live snapshot: " + snapshot.Describe());
+            return snapshot.ProcessRunning && snapshot.MetricsFound && snapshot.MetricsPort > 0;
+        });
+
+        TestLiveCloudflared("Live: repair waits then reports real state instead of fake success", () =>
+        {
+            // 真跑一次修复管线（超时缩短到 8s/8s，避免拖慢测试）。在本机配置正确但
+            // 边缘不通的时段，必须返回 0 且带具体网络层原因，绝不能秒回"已修复并重启"。
+            Environment.SetEnvironmentVariable("TAPRELAY_CF_REPAIR_EDGE_WAIT_MS", "8000");
+            Environment.SetEnvironmentVariable("TAPRELAY_CF_REPAIR_VERIFY_MS", "8000");
+            try
+            {
+                var result = CloudflaredTunnelRepair.Repair(
+                    1122, new[] { "wss://win.guliacer.dpdns.org" }, null);
+                Console.WriteLine("  repair level=" + result.Level + " msg=" + result.Message);
+                if (string.IsNullOrWhiteSpace(result.Message))
+                {
+                    return false;
+                }
+
+                return result.Level == 2
+                    ? result.Message.Contains("公网可用") || result.Message.Contains("无需修复")
+                    : result.Message.Contains("公网") || result.Message.Contains("边缘");
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("TAPRELAY_CF_REPAIR_EDGE_WAIT_MS", null);
+                Environment.SetEnvironmentVariable("TAPRELAY_CF_REPAIR_VERIFY_MS", null);
+            }
+        });
+
         Test("frp ini detector parses http tunnel with matching local_port", () =>
         {
             var file = Path.Combine(Path.GetTempPath(), "frp-test-" + Guid.NewGuid().ToString("N") + ".ini");
@@ -2912,6 +3098,17 @@ internal static class Program
         {
             _skipped++;
             Console.WriteLine("SKIP: " + name + " (enable with --live-freebuff)");
+            return;
+        }
+        Test(name, assertion);
+    }
+
+    private static void TestLiveCloudflared(string name, Func<bool> assertion)
+    {
+        if (!_liveCloudflared)
+        {
+            _skipped++;
+            Console.WriteLine("SKIP: " + name + " (enable with --live-cloudflared)");
             return;
         }
         Test(name, assertion);

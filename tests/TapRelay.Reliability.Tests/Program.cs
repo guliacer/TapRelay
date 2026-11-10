@@ -90,6 +90,46 @@ internal static partial class Program
             Require(!result.Accepted && result.Code == "CANCELLED" && !started, "Cancelled request launched a child");
         });
 
+        await Test("Comfy API-only controller metadata retains muted group nodes", () =>
+        {
+            var hostType = typeof(ShellAgentApiProxy).Assembly.GetType("TapRelay.ComfyUiConsoleHost");
+            var reader = hostType?.GetMethod("ReadGgControllerGroupsFile",
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+            Require(reader != null, "Comfy controller group sidecar reader is missing");
+            var optionType = hostType!.GetNestedType("GgOption",
+                System.Reflection.BindingFlags.NonPublic);
+            Require(optionType != null, "Comfy option metadata type is missing");
+            var optionList = (System.Collections.IList)Activator.CreateInstance(
+                typeof(System.Collections.Generic.List<>).MakeGenericType(optionType!))!;
+            var optionConstructor = optionType!.GetConstructors(
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.Public |
+                    System.Reflection.BindingFlags.NonPublic)
+                .Single(constructor => constructor.GetParameters().Length == 5);
+            optionList.Add(optionConstructor.Invoke(new object[]
+                { "597.enabled", "enabled", "597", "GGGroupControllerS", "enabled" }));
+
+            var path = Path.Combine(Path.GetTempPath(), "taprelay-gg-" + Guid.NewGuid().ToString("N") + ".json");
+            File.WriteAllText(path,
+                "{\"controllerGroups\":[{\"optionKey\":\"597.enabled\",\"mutedNodes\":[\"595\",\"596\"]}]}");
+            try
+            {
+                var groups = reader!.Invoke(null, new object[] { path, optionList }) as System.Collections.IEnumerable;
+                Require(groups != null, "Sidecar groups were not parsed");
+                var iterator = groups!.GetEnumerator();
+                Require(iterator.MoveNext(), "Sidecar group was omitted");
+                var group = iterator.Current!;
+                var key = group.GetType().GetProperty("OptionKey")?.GetValue(group) as string;
+                var nodes = group.GetType().GetProperty("MutedNodes")?.GetValue(group)
+                            as System.Collections.Generic.IEnumerable<string>;
+                Require(key == "597.enabled", "Controller option key changed");
+                Require(nodes != null && nodes.SequenceEqual(new[] { "595", "596" }),
+                    "Saved nodes inside the group were not retained");
+            }
+            finally { File.Delete(path); }
+            return Task.CompletedTask;
+        });
+
         await TestWebSockets();
         await TestLogsAndMonitor();
         await TestFreebuffApiProxy();

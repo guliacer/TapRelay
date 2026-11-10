@@ -32,6 +32,8 @@
     <Compile Include="..\..\pc-app\WorkBuddySessionReader.cs" Link="WorkBuddySessionReader.cs" />
     <Compile Include="..\..\pc-app\WorkBuddyAcpAgentProxy.cs" Link="WorkBuddyAcpAgentProxy.cs" />
     <Compile Include="..\..\pc-app\CloudflaredTunnelDetector.cs" Link="CloudflaredTunnelDetector.cs" />
+    <Compile Include="..\..\pc-app\CloudflaredTunnelHealth.cs" Link="CloudflaredTunnelHealth.cs" />
+    <Compile Include="..\..\pc-app\CloudflaredTunnelRepair.cs" Link="CloudflaredTunnelRepair.cs" />
     <Compile Include="..\..\pc-app\TunnelDetector.cs" Link="TunnelDetector.cs" />
     <Compile Include="..\..\pc-app\FrpTunnelDetector.cs" Link="FrpTunnelDetector.cs" />
     <Compile Include="..\..\pc-app\NgrokTunnelDetector.cs" Link="NgrokTunnelDetector.cs" />
@@ -40,5 +42,6 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="3.1.32" />
+    <PackageReference Include="System.Management" Version="4.7.0" />
   </ItemGroup>
 </Project>

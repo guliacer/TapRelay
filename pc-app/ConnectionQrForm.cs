@@ -236,7 +236,7 @@ namespace TapRelay
 
             try
             {
-                var (level, message) = await Task.Run(() => ProbePublicTunnel());
+                var (level, message) = await Task.Run(() => ProbePublicTunnel(ReportCheckProgress));
                 _checkResultLabel.ForeColor = level switch
                 {
                     2 => colors.Success,
@@ -268,7 +268,14 @@ namespace TapRelay
 
             try
             {
-                var result = await Task.Run(() => CloudflaredTunnelRepair.Repair(1122));
+                // Progress<T> 在构造时捕获 UI 线程上下文，回调里可以直接碰控件。
+                var progress = new Progress<string>(text =>
+                {
+                    _checkResultLabel.ForeColor = colors.TextSecondary;
+                    _checkResultLabel.Text = text;
+                });
+                var endpoints = PublicCandidates();
+                var result = await Task.Run(() => CloudflaredTunnelRepair.Repair(1122, endpoints, progress));
                 _checkResultLabel.ForeColor = result.Level switch
                 {
                     2 => colors.Success,
@@ -289,30 +296,99 @@ namespace TapRelay
             }
         }
 
-        /// <summary>探测公网候选；返回 (0=失败, 1=警告, 2=正常) 与用户可读消息。</summary>
-        private (int Level, string Message) ProbePublicTunnel()
+        /// <summary>二维码候选 + 自动探测到的隧道入口，去重后的公网候选列表。</summary>
+        private List<string> PublicCandidates()
         {
-            var candidates = _endpoints
+            return _endpoints
                 .Concat(TunnelDetectorRegistry.DetectAll(1122))
-                .Distinct(StringComparer.OrdinalIgnoreCase);
-            var publicEndpoints = candidates.Where(IsPublicCandidate).ToList();
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Where(IsPublicCandidate)
+                .ToList();
+        }
+
+        /// <summary>探测公网候选；返回 (0=失败, 1=警告, 2=正常) 与用户可读消息。</summary>
+        private (int Level, string Message) ProbePublicTunnel(Action<string>? onTick = null)
+        {
+            var publicEndpoints = PublicCandidates();
             if (publicEndpoints.Count == 0)
             {
                 return (1, "无公网候选，跨网络需配置隧道工具");
             }
 
-            var cloudflaredRunning = Process.GetProcessesByName("cloudflared").Length > 0;
-            foreach (var endpoint in publicEndpoints)
+            // 最多探测三轮、每轮间隔 5 秒：重启隧道后边缘重连要几秒到几十秒，
+            // 只探测一次会把"正在重连"误报成"不可达"。
+            for (var round = 1; round <= 3; round++)
             {
-                var (ok, _) = ProbeEndpoint(endpoint);
-                if (ok)
+                var failures = new List<string>();
+                foreach (var endpoint in publicEndpoints)
                 {
-                    return (2, $"公网正常：{endpoint}");
+                    var (ok, detail) = ProbeEndpoint(endpoint);
+                    if (ok)
+                    {
+                        return (2, $"公网正常：{endpoint}");
+                    }
+
+                    failures.Add($"{endpoint} → {detail}");
                 }
+                var failure = CloudflaredTunnelRepair.FormatEndpointFailures(failures);
+
+                var health = CloudflaredTunnelHealth.Read();
+                var hint = health.Describe();
+                if (round == 3)
+                {
+                    if (CloudflaredTunnelRepair.HasCloudflare1033(failures))
+                    {
+                        var edgeIn1033 = CloudflaredTunnelHealth.ProbeEdge();
+                        if (!edgeIn1033.TunnelPortReachable)
+                        {
+                            return (0, $"至少一个公网候选返回 Cloudflare 1033，实测{edgeIn1033.Describe()}。" +
+                                        "7844 连不上属线路问题，改配置无效：请换网络后重试");
+                        }
+
+                        if (edgeIn1033.TlsInterfered)
+                        {
+                            return (0, $"至少一个公网候选返回 Cloudflare 1033，实测{edgeIn1033.Describe()}：" +
+                                        "TLS 握手被链路中断，隧道无法注册。请让代理真正承载该流量或换网络；" +
+                                        "手机可继续走中继房间");
+                        }
+
+                        return (0, $"公网地址没有活动隧道承载（Cloudflare 1033）：{failure}。" +
+                                    "网络可达但隧道未注册，请重启 cloudflared 服务后重试");
+                    }
+
+                    // 有实测证据再下结论：7844/TLS 断在哪一层，决定是换网络还是重启进程。
+                    var edge = CloudflaredTunnelHealth.ProbeEdge();
+                    var basis = edge.TlsInterfered
+                        ? $"实测{edge.Describe()}，TLS 被链路中断，改配置无效"
+                        : !edge.TunnelPortReachable
+                            ? $"实测{edge.Describe()}，7844 连不上属线路问题"
+                            : $"实测{edge.Describe()}，网络可达，属隧道未注册";
+                    var tip = health.ProcessRunning ? hint : "cloudflared 未运行";
+                    return (0, $"公网不可达（{failure}），{tip}，{basis}；手机自动切局域网");
+                }
+
+                onTick?.Invoke($"第 {round} 轮探测未通（{failure}），隧道状态：{hint}，5 秒后重试…");
+                System.Threading.Thread.Sleep(5000);
             }
 
-            var tip = cloudflaredRunning ? "手机自动切局域网" : "cloudflared 未运行，手机自动切局域网";
-            return (0, $"公网不可达（{publicEndpoints[0]}），{tip}");
+            return (0, "公网探测未完成");
+        }
+
+        /// <summary>后台线程往检查结果标签上写进度（WinForms 跨线程必须 Invoke）。</summary>
+        private void ReportCheckProgress(string text)
+        {
+            if (_checkResultLabel.IsDisposed)
+            {
+                return;
+            }
+
+            if (_checkResultLabel.InvokeRequired)
+            {
+                _checkResultLabel.BeginInvoke(new Action(() => ReportCheckProgress(text)));
+                return;
+            }
+
+            _checkResultLabel.Text = text;
         }
 
         /// <summary>对单个端点做 HTTP(S) /health 探测（Cloudflare 只暴露 443，wss 域名用 https）。</summary>
@@ -342,12 +418,15 @@ namespace TapRelay
                 using var client = new HttpClient();
                 client.Timeout = TimeSpan.FromSeconds(5);
                 var response = client.GetAsync(url).GetAwaiter().GetResult();
+                var status = (int)response.StatusCode;
                 if (response.IsSuccessStatusCode)
                 {
                     return (true, url + " OK");
                 }
 
-                return (false, url + " → HTTP " + (int)response.StatusCode);
+                // Cloudflare 错误页正文带 "error code: 1033" 之类身份码，提取出来给出精准提示。
+                var body = response.Content.ReadAsStringAsync().GetAwaiter().GetResult() ?? string.Empty;
+                return (false, CloudflaredTunnelHealth.DescribeHttpStatus(status, body));
             }
             catch (Exception ex)
             {

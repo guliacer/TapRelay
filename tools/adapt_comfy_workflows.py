@@ -3,7 +3,7 @@
 """批量适配本机 ComfyUI 原生工作流到 TapRelay 手机控制台。
 
 扫描 source_dir(本机 ComfyUI 的 user/default/workflows),排除垃圾目录,按内容指纹去重,
-转换每个候选为 <name>.api.json + <name>.ui.json,写入 out_dir(默认本地数据目录)。
+转换每个候选为 <name>.api.json + <name>.ui.json + <name>.gg.json,写入 out_dir(默认本地数据目录)。
 
 用法:
   python adapt_comfy_workflows.py --dry-run            # 只打印去重结果,不写文件
@@ -21,7 +21,7 @@ from collections import Counter, defaultdict
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from comfy_native_to_api import (
     fetch_object_info, convert_api, derive_ui, flatten_subgraphs,
-    format_diagnostics)
+    format_diagnostics, gg_metadata)
 
 JUNK_DIRS = {"杂七杂八的工作流", "工作流备份，不得直接使用修改", "插件示例工作流"}
 
@@ -164,12 +164,14 @@ def main():
     for fp, group in by_fp.items():
         rel, src, cat = group[0]
         base = os.path.splitext(os.path.basename(src))[0]
-        api, titles, diag = convert_api(json.load(open(src, encoding="utf-8")), object_info)
+        native = json.load(open(src, encoding="utf-8"))
+        api, titles, diag = convert_api(native, object_info)
         # 空壳图:转换后无可执行节点,手机端不可用,跳过并清理可能残留的旧文件。
         if not api:
             out_api = os.path.join(args.out, base + ".api.json")
             out_ui = os.path.join(args.out, base + ".ui.json")
-            for old in (out_api, out_ui):
+            out_gg = os.path.join(args.out, base + ".gg.json")
+            for old in (out_api, out_ui, out_gg):
                 if os.path.exists(old):
                     os.remove(old)
             skipped_empty += 1
@@ -179,10 +181,13 @@ def main():
         order += 1
         out_api = os.path.join(args.out, base + ".api.json")
         out_ui = os.path.join(args.out, base + ".ui.json")
+        out_gg = os.path.join(args.out, base + ".gg.json")
         with open(out_api, "w", encoding="utf-8") as f:
             json.dump(api, f, ensure_ascii=False, indent=2)
         with open(out_ui, "w", encoding="utf-8") as f:
             json.dump(ui, f, ensure_ascii=False, indent=2)
+        with open(out_gg, "w", encoding="utf-8") as f:
+            json.dump(gg_metadata(native, api, ui), f, ensure_ascii=False, indent=2)
         written += 1
         print("✓ %s  (nodes=%d, fields=%d)" % (base, len(api), len(ui["fields"])))
         # 自动诊断:新增节点/插件版本变化导致无法自动适配时,这里必须报警而不是静默产出坏图。

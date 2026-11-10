@@ -14,6 +14,12 @@
 - New-version dialogs on Windows and Android show the release summary and offer update, skip once, or skip forever.
 - No accounts, cloud database, or third-party push service; the default port is `1122`.
 
+## Recent updates
+
+- Fixed Cloudflared edge disconnect recovery, undrained pipes in manual launches, and lost diagnostics across multiple public endpoints while waiting for real reconnection results.
+- Improved native ComfyUI workflow conversion by fixing wildcard and Reroute parameter mapping, adding `.gg.json` controller-group sidecars, and loading that metadata for API-only workflows.
+- Added regression coverage for Cloudflared, the workflow converter, and API-only group metadata, then verified the release build, health endpoint, and conversion of 28 workflows.
+
 ## Quick start
 
 ### Windows

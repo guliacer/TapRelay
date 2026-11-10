@@ -13,6 +13,8 @@ pc-app/publish/*
 .gradle-user/
 **/bin/
 **/obj/
+**/__pycache__/
+*.py[cod]
 
 # Machine-specific agent state and continuation records.
 .codegraph/

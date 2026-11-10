@@ -23,13 +23,20 @@ API prompt 格式(<name>.api.json)及配套 <name>.ui.json。
 - suspicious: 控件值类型与声明不符(槽位错位的直接证据)。
 - unsupported: 依赖了本机未加载的节点类型。
 
+手机端只需要“一个真正执行、能改”的参数,不需要每个节点都铺一格:
+- GGOptionConfirm 的每个选项写进 .gg.json,由控制台按分组开关(多选)或单选下拉呈现。
+- ComfySwitchNode 只在“开”分支才是全局开关;开关关着时它是预设的内部跳线,不展示。
+- LoRA 只保留 LoRA数量 之内的槽位,空槽不占手机版面。
+- 输入图在 .ui.json 里留空,手机端必须从相册选图,不沿用桌面测试图。
+
 用法:
   python comfy_native_to_api.py <native.json> [--base-url URL] [--category 分类]
-输出两个文件到同目录(同基名 .api.json / .ui.json)。也可作为模块 import 使用。
+输出三个文件到同目录(同基名 .api.json / .ui.json / .gg.json)。也可作为模块 import 使用。
 """
 import copy
 import json
 import os
+import re
 import sys
 import urllib.request
 import urllib.error
@@ -109,6 +116,9 @@ PROMPT_ACCESSORY_PATTERNS = (
 )
 
 _MISSING = object()
+
+# LoRA 加载器的编号槽位: LoRA1名称 / LoRA1强度。
+_LORA_SLOT = re.compile(r"^LoRA(\d+)(名称|强度)$")
 
 
 def is_steps_input(name):
@@ -694,8 +704,9 @@ class GraphResolver(object):
             return ("value", wv[0]) if wv else note("primitive-no-value")
 
         if ctype in OPTION_VALUE_TYPES:
-            wv = nd.get("widgets_values") or []
-            return ("value", wv[slot]) if 0 <= slot < len(wv) else note("option-slot-out-of-range")
+            # 选项节点自己的连线不算值:它由 _note_option_targets 单独记
+            # 目标,下游也不该把线上读回一个悬空引用。
+            return None
 
         if ctype in self.real_types:
             if mode == 2:  # 静音:不执行,输出断开
@@ -743,6 +754,48 @@ class GraphResolver(object):
                 continue
             result[ctype] = result.get(ctype, 0) + 1
         return result
+
+
+def output_widget_name(output):
+    """选项输出对应的后端控件名;通配符“连接到控件输入 N”是空位,返回 None。"""
+    if not isinstance(output, dict) or output.get("type") == "*":
+        return None
+    return (output.get("widget") or {}).get("name")
+
+
+def link_target(nd, slot, resolver, depth=0):
+    """`nd` 第 `slot` 个输出真正写到的控件:返回 (节点 id, 输入名) 或 None。
+
+    选项节点自己不执行,它的每条线都终结在别的节点的控件上,中间可能隔着
+    Reroute/SetNode/旁路节点,所以要沿连线走到真正持有该控件的节点。
+    """
+    outputs = nd.get("outputs") or []
+    if depth > 16 or slot < 0 or slot >= len(outputs):
+        return None
+    for link in outputs[slot].get("links") or []:
+        target = _link_target_by_link(link, resolver, depth)
+        if target is not None:
+            return target
+    return None
+
+
+def _link_target_by_link(link, resolver, depth):
+    if link is None or depth > 16:
+        return None
+    hits = [(sid, port) for sid, entry in resolver.node_map.items()
+            for port in entry.get("inputs") or [] if port.get("link") == link]
+    if len(hits) != 1:
+        return None
+    src, port = hits[0]
+    node = resolver.node_map[src]
+    if node.get("type") in FRONTEND_ONLY_TYPES:
+        for next_slot, output in enumerate(node.get("outputs") or []):
+            for next_link in output.get("links") or []:
+                target = _link_target_by_link(next_link, resolver, depth + 1)
+                if target is not None:
+                    return target
+        return None
+    return (str(src), port.get("name"))
 
 
 def _to_api_value(resolved):
@@ -1083,7 +1136,8 @@ def convert_api(native, object_info):
     titles = {}
     for nd in native.get("nodes", []):
         ctype = nd.get("type")
-        if ctype not in resolver.real_types:
+        # 前端虚拟节点(选项/改线/Reroute 等)没有 node_class,不在 object_info 里。
+        if ctype not in resolver.real_types and ctype not in FRONTEND_ONLY_TYPES:
             continue
         mode = nd.get("mode", 0)
         if mode == 2:
@@ -1221,6 +1275,10 @@ def convert_api(native, object_info):
             link = inp.get("link")
             trace = []
             resolved = resolver.resolve(link, trace=trace) if link is not None else None
+            if resolved is not None and resolved[0] == "ref":
+                # 选项节点自己的线:值落在 _note_option_targets 记下的目标上,
+                # 这条连线本身不是后端输入。
+                continue
             if resolved is not None:
                 inputs[target] = _to_api_value(resolved)
                 continue
@@ -1267,13 +1325,202 @@ def convert_api(native, object_info):
         # LoadImage 默认文件名清空,避免手机端沿用桌面测试图。
         if ctype == "LoadImage" and isinstance(inputs.get("image"), str):
             inputs["image"] = ""
+
+        if ctype in OPTION_VALUE_TYPES:
+            _note_option_targets(api, nid, nd, resolver)
+            continue
+
         api[str(nid)] = {"inputs": inputs, "class_type": ctype,
                          "_meta": {"title": title}}
     return api, titles, diagnostics
 
 
+def _is_placeholder_lora(value):
+    return value is None or value == "" or value == "None"
+
+
+def _enabled_lora_slots(node, inputs):
+    """LoRA 加载器里真正启用的槽位序号。非 LoRA 加载器返回 None。
+
+    LoRA数量 是手机端 LoRA 分组的存在依据(GGLoRACustomLoader);LoraLoaderModelOnly
+    这类单槽加载器没有数量控件,它的槽位就是唯一的那一个。
+    """
+    if "LoRA数量" in inputs:
+        count = inputs["LoRA数量"]
+        limit = int(count) if isinstance(count, (int, float)) and not isinstance(count, bool) else 0
+        slots = set()
+        for name, value in inputs.items():
+            match = _LORA_SLOT.match(name)
+            if match and int(match.group(1)) <= limit and not _is_placeholder_lora(value):
+                slots.add(int(match.group(1)))
+        return slots
+    if "lora_name" in inputs:
+        return {1} if not _is_placeholder_lora(inputs["lora_name"]) else {0}
+    return None
+
+
+def _note_option_targets(api, nid, nd, resolver):
+    """选项节点的每个输出管着哪个控件,直接写进它自己的 inputs。
+
+    `{控件名: [目标节点, 输入名]}` 与 `to_api` 的 `_target` 同形。控件名取
+    输出上挂的那个 widget 名,输出槽位按跳过 "*" 空位后的顺序数,和选项的
+    widgets_values 对齐。线没连或断了就没有可写的目标,这条选项不出现。
+    """
+    widgets = nd.get("widgets_values") if isinstance(nd.get("widgets_values"), list) else []
+    entries = option_entries(nd, resolver)
+    targets, values = {}, {}
+    for item in entries:
+        targets[item["ref"]] = [item["node"], item["name"]]
+        values[item["ref"]] = widgets[item["slot"]] if item["slot"] < len(widgets) else None
+    # API 图没有输出口,PS 端只能从 title 读选项名;只有一条线的节点用
+    # 那条线的输出名,多条线保留节点原名(PS 端按控件名逐条区分)。
+    title = nd.get("title")
+    if not title and len(entries) == 1:
+        title = entries[0]["label"]
+    api[str(nid)] = {"inputs": values, "class_type": nd["type"],
+                     "_meta": {"title": title or nd["type"]},
+                     "widgets_values": widgets, "_target": targets}
+
+
+def option_entries(nd, resolver):
+    """选项接好的每条线:输出名、落到的控件、以及它占的 widgets_values 序号。
+
+    线断了或接到的节点没进图就没有可写的地方,这条直接不出现。
+    """
+    out = []
+    value_slot = 0
+    for output_slot, output in enumerate(nd.get("outputs") or []):
+        ref = output_widget_name(output)
+        if ref is None:
+            continue
+        target = link_target(nd, output_slot, resolver)
+        if target is not None:
+            out.append({"ref": ref, "label": output.get("name") or ref, "slot": value_slot,
+                        "node": target[0], "name": target[1]})
+        value_slot += 1
+    return out
+
+
+def gg_controller_groups(native, api):
+    """从原生图提取 API 图无法表达的 GG 编组成员,写入 .gg.json sidecar。"""
+    bounds_by_group = {}
+    for group in native.get("groups") or []:
+        if not isinstance(group, dict):
+            continue
+        title = group.get("title")
+        bounds = group.get("bounding")
+        if not isinstance(title, str) or not isinstance(bounds, list) or len(bounds) < 4:
+            continue
+        try:
+            bounds_by_group[title] = [float(bounds[index]) for index in range(4)]
+        except (TypeError, ValueError):
+            continue
+
+    options_by_controller = {}
+    for node in api.values():
+        if node.get("class_type") not in OPTION_VALUE_TYPES:
+            continue
+        for target in (node.get("_target") or {}).values():
+            if not isinstance(target, list) or len(target) != 2:
+                continue
+            controller_id = str(target[0])
+            key = controller_id + "." + str(target[1])
+            options_by_controller.setdefault(controller_id, []).append(key)
+
+    result = []
+    for node in native.get("nodes") or []:
+        if not isinstance(node, dict) or node.get("type") != "GGGroupControllerS":
+            continue
+        if node.get("id") is None:
+            continue
+        controller_id = str(node["id"])
+        properties = node.get("properties") or {}
+        group_name = properties.get("selectedGroup")
+        bounds = bounds_by_group.get(group_name)
+        keys = options_by_controller.get(controller_id) or []
+        if not bounds or not keys:
+            continue
+        muted = []
+        for member in native.get("nodes") or []:
+            if not isinstance(member, dict) or member.get("id") is None or str(member["id"]) == controller_id:
+                continue
+            pos = member.get("pos")
+            if not isinstance(pos, list) or len(pos) < 2:
+                continue
+            try:
+                x, y = float(pos[0]), float(pos[1])
+            except (TypeError, ValueError):
+                continue
+            if bounds[0] <= x <= bounds[0] + bounds[2] and bounds[1] <= y <= bounds[1] + bounds[3]:
+                muted.append(str(member.get("id")))
+        if muted:
+            result.append({"optionKey": keys[0], "mutedNodes": muted})
+    return result
+
+
+def gg_metadata(native, api, ui):
+    """构建两个转换入口共用的 .gg.json 数据结构。"""
+    return {
+        "fields": ui["fields"],
+        "options": gg_options(api),
+        "controllerGroups": gg_controller_groups(native, api),
+    }
+
+
+def _bound_by_option(api, nid, iname):
+    """该控件是否被 GGOptionConfirm 接管:接管后由选项呈现,不再单独铺一格。"""
+    for node in api.values():
+        for target in (node.get("_target") or {}).values():
+            if target == [nid, iname]:
+                return True
+    return False
+
+
+_OPTION_REGION = re.compile(r"^(.*?)\s*\d+$")
+# 同一选项节点上的多条开关合成一组时用的名字;细分成哪些开关看 keys。
+OPTION_GROUP_LABEL = "参数开关"
+
+
+def gg_options(api):
+    """GGOptionConfirm 落在哪些控件上,每个开关给一个 {key, label, kind}。
+
+    `key` 是目标控件的 `节点.输入`,手机端把它当参数写回去;`label` 是选项
+    节点自己标的输出名(混淆 1、打光 2…),去掉尾号分组后同组超过一条的
+    合成一个 `multi`,手机端只给一个开关就能整体开关该组。数值/下拉选项
+    的 `choices` 是目标控件当前接受的取值。
+    """
+    result, seen, regions = [], set(), OrderedDict()
+    for node in api.values():
+        if node["class_type"] not in OPTION_VALUE_TYPES:
+            continue
+        for widget, target in (node.get("_target") or {}).items():
+            if not (isinstance(target, list) and len(target) == 2):
+                continue
+            key = "%s.%s" % (target[0], target[1])
+            if key in seen:
+                continue
+            seen.add(key)
+            value = node["inputs"].get(widget)
+            match = _OPTION_REGION.match(widget)
+            if match and isinstance(value, bool):
+                regions.setdefault(match.group(1), []).append(key)
+                continue
+            result.append({"key": key, "label": widget, "kind": "value",
+                           "choices": [value] if value is not None else []})
+    for keys in regions.values():
+        if len(keys) > 1:
+            result.append({"key": keys[0], "label": OPTION_GROUP_LABEL, "kind": "multi", "keys": keys})
+        else:
+            # 单条开关用它的 key 作名字(如 "147.组启用1"),键要稳定。
+            result.append({"key": keys[0], "label": keys[0], "kind": "toggle", "choices": [True, False]})
+    return result
+
+
 def derive_ui(api, titles, category, order, source_filename):
-    """根据 api prompt 推导 .ui.json 的 fields / labels。"""
+    """根据 api prompt 推导 .ui.json 的 fields / labels / defaults。
+
+    fields 的顺序就是手机端的展示顺序:输入图、提示词、数值参数,再是开关。
+    """
     base_title = os.path.splitext(os.path.basename(source_filename))[0]
     for prefix in ("▶", "▷", "▶▶", "▶▷", "【", "】", "「", "」"):
         base_title = base_title.replace(prefix, "")
@@ -1283,6 +1530,7 @@ def derive_ui(api, titles, category, order, source_filename):
     labels = OrderedDict()
     defaults = {}
     seen = set()
+    toggles = set()
 
     def editable_value(nid, iname):
         """该输入在 API 图里是否对应一个可编辑的真实值。
@@ -1304,13 +1552,15 @@ def derive_ui(api, titles, category, order, source_filename):
         node = api.get(nid) or {}
         if is_prompt_accessory(node.get("class_type"), titles.get(nid, "")):
             return
+        if _bound_by_option(api, nid, iname):
+            return
         v, ok = editable_value(nid, iname)
         if not ok:
             return
         seen.add(key)
         fields.append(key)
         labels[key] = label
-        defaults[key] = v
+        defaults[key] = "" if iname == "image" and node.get("class_type") == "LoadImage" else v
 
     def label_for(nid, iname):
         t = titles.get(nid, "")
@@ -1429,20 +1679,42 @@ def derive_ui(api, titles, category, order, source_filename):
                 add(f"{nid}.{iname}", label_for(nid, iname), nid, iname)
                 break
 
-    # 6) LoRA
+    # 6) LoRA:同名节点在手机端以第一个为准(见 add),这里先按启用槽位收窄。
     for nid, node in api.items():
-        for iname in node["inputs"]:
+        inputs = node["inputs"]
+        slots = _enabled_lora_slots(node, inputs)
+        if slots is None:
+            continue
+        for iname in inputs:
+            match = _LORA_SLOT.match(iname)
             if is_lora_input(iname) and not is_sampler_or_scheduler(iname):
-                add(f"{nid}.{iname}", label_for(nid, iname), nid, iname)
+                if match is None or int(match.group(1)) in slots:
+                    add(f"{nid}.{iname}", label_for(nid, iname), nid, iname)
+
+    # 7) 全局开关:ComfySwitchNode 打开时整条分支才运行,手机端用开关呈现。
+    for nid, node in api.items():
+        if node.get("class_type") != "ComfySwitchNode":
+            continue
+        if node["inputs"].get("switch") is not True:
+            continue
+        v, ok = editable_value(nid, "switch")
+        if not ok or f"{nid}.switch" in seen:
+            continue
+        seen.add(f"{nid}.switch")
+        fields.append(f"{nid}.switch")
+        labels[f"{nid}.switch"] = titles.get(nid) or "分支开关"
+        defaults[f"{nid}.switch"] = v
+        toggles.add(f"{nid}.switch")
 
     ui = {
         "title": base_title,
         "order": order,
-        "hideAdvanced": False,
+        "hideAdvanced": len(fields) == len(toggles),
         "fields": fields,
         "labels": labels,
         "defaults": defaults,
         "category": category,
+        "toggles": sorted(toggles),
     }
     return ui
 
@@ -1461,6 +1733,8 @@ def convert_file(native_path, base_url, category, order):
         json.dump(api, f, ensure_ascii=False, indent=2)
     with open(base + ".ui.json", "w", encoding="utf-8") as f:
         json.dump(ui, f, ensure_ascii=False, indent=2)
+    with open(base + ".gg.json", "w", encoding="utf-8") as f:
+        json.dump(gg_metadata(native, api, ui), f, ensure_ascii=False, indent=2)
     return api, ui, diagnostics
 
 
